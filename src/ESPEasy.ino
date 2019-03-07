@@ -84,6 +84,8 @@
 
 // Define globals before plugin sets to allow a personal override of the selected plugins
 #include "ESPEasy-Globals.h"
+// Must be included after all the defines, since it is using TASKS_MAX
+#include "_Plugin_Helper.h"
 #include "define_plugin_sets.h"
 // Plugin helper needs the defined controller sets, thus include after 'define_plugin_sets.h'
 #include "_CPlugin_Helper.h"
@@ -103,7 +105,7 @@ int firstEnabledBlynkController() {
 
 //void checkRAM( const __FlashStringHelper* flashString);
 
-#ifdef CORE_2_5_0
+#ifdef CORE_POST_2_5_0
 /*********************************************************************************************\
  * Pre-init
 \*********************************************************************************************/
@@ -126,10 +128,11 @@ void setup()
 #endif
   WiFi.persistent(false); // Do not use SDK storage of SSID/WPA parameters
   WiFi.setAutoReconnect(false);
-  setWifiMode(WIFI_OFF);
+  WiFi.mode(WIFI_OFF);
   lowestFreeStack = getFreeStackWatermark();
   lowestRAM = FreeMem();
 
+  resetPluginTaskData();
   Plugin_id.resize(PLUGIN_MAX);
   Task_id_to_Plugin_id.resize(TASKS_MAX);
 
@@ -452,6 +455,7 @@ void updateLoopStats_30sec(byte loglevel) {
 
   msecTimerHandler.updateIdleTimeStats();
 
+#ifndef BUILD_NO_DEBUG
   if (loglevelActiveFor(loglevel)) {
     String log = F("LoopStats: shortestLoop: ");
     log += shortestLoop;
@@ -467,6 +471,7 @@ void updateLoopStats_30sec(byte loglevel) {
     log += countFindPluginId;
     addLog(loglevel, log);
   }
+#endif
   countFindPluginId = 0;
   loop_usec_duration_total = 0;
   loopCounter_full = 1;
@@ -767,12 +772,14 @@ void runOncePerSecond()
 void logTimerStatistics() {
   byte loglevel = LOG_LEVEL_DEBUG;
   updateLoopStats_30sec(loglevel);
+#ifndef BUILD_NO_DEBUG
 //  logStatistics(loglevel, true);
   if (loglevelActiveFor(loglevel)) {
     String queueLog = F("Scheduler stats: (called/tasks/max_length/idle%) ");
     queueLog += msecTimerHandler.getQueueStats();
     addLog(loglevel, queueLog);
   }
+#endif
 }
 
 /*********************************************************************************************\
@@ -904,36 +911,51 @@ void backgroundtasks()
     return;
   }
   START_TIMER
+  const bool wifiConnected = WiFiConnected();
   runningBackgroundTasks=true;
 
   #if defined(ESP8266)
+  if (wifiConnected) {
     tcpCleanup();
+  }
   #endif
   process_serialWriteBuffer();
   if(!UseRTOSMultitasking){
-    if (Settings.UseSerial)
-      if (Serial.available())
-        if (!PluginCall(PLUGIN_SERIAL_IN, 0, dummyString))
-          serial();
-    WebServer.handleClient();
-    checkUDP();
+    if (Settings.UseSerial && Serial.available()) {
+      if (!PluginCall(PLUGIN_SERIAL_IN, 0, dummyString)) {
+        serial();
+      }
+    }
+    if (wifiConnected) {
+      WebServer.handleClient();
+      checkUDP();
+    }
   }
 
   // process DNS, only used if the ESP has no valid WiFi config
-  if (dnsServerActive)
+  if (dnsServerActive && wifiConnected)
     dnsServer.processNextRequest();
 
   #ifdef FEATURE_ARDUINO_OTA
-  if(Settings.ArduinoOTAEnable)
+  if(Settings.ArduinoOTAEnable && wifiConnected)
     ArduinoOTA.handle();
 
   //once OTA is triggered, only handle that and dont do other stuff. (otherwise it fails)
   while (ArduinoOTAtriggered)
   {
     delay(0);
-    ArduinoOTA.handle();
+    if (WiFiConnected()) {
+      ArduinoOTA.handle();
+    }
   }
 
+  #endif
+
+  #ifdef FEATURE_MDNS
+  // Allow MDNS processing
+  if (wifiConnected) {
+    MDNS.update();
+  }
   #endif
 
   delay(0);

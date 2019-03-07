@@ -20,6 +20,8 @@ IRsend *Plugin_035_irSender;
 
 #define from_32hex(c) ((((c) | ('A' ^ 'a')) - '0') % 39)
 
+#define P35_Ntimings 250 //Defines the ammount of timings that can be stored. Used in RAW and RAW2 encodings
+
 boolean Plugin_035(byte function, struct EventStruct *event, String& string)
 {
   boolean success = false;
@@ -123,8 +125,14 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
             printWebString += IrBLen;
             printWebString += F("<BR>");
 
-            uint16_t buf[200];
-            uint16_t idx = 0;
+            uint16_t idx = 0;  //If this goes above the buf.size then the esp will throw a 28 EXCCAUSE
+            uint16_t *buf;
+            buf =  new uint16_t[P35_Ntimings]; //The Raw Timings that we can buffer.
+            if (buf == nullptr) { // error assigning memory.
+            success = false;
+            return success;
+            }
+            
             if (IrType.equals(F("raw"))) {
                 unsigned int c0 = 0; //count consecutives 0s
                 unsigned int c1 = 0; //count consecutives 1s
@@ -209,12 +217,18 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
                 for (unsigned int i = 0, total = IrRaw.length(), gotRep = 0, rep = 0; i < total;) {
                    char c = IrRaw[i++];
                    if (c == '*') {
-                       if (i+2 >= total || idx + (rep = from_32hex(IrRaw[i++])) * 2 > sizeof(buf))
-                           return addErrorTrue("Invalid RAW2 B32 encoding!");
+                       if (i+2 >= total || idx + (rep = from_32hex(IrRaw[i++])) * 2 > sizeof(buf[0])*P35_Ntimings){
+                         delete[] buf;
+                         buf = nullptr;
+                         return addErrorTrue();
+                       }
                        gotRep = 2;
                    } else {
-                       if ((c == '^' && i+1 >= total) || idx == sizeof(buf))
-                           return addErrorTrue("Invalid RAW2 B32 encoding!");
+                       if ((c == '^' && i+1 >= total) || idx >= sizeof(buf[0])*P35_Ntimings){
+                         delete[] buf;
+                         buf = nullptr;
+                         return addErrorTrue();
+                       }
 
                        uint16_t irLen = (idx & 1)? IrBLen : IrPLen;
                        if (c == '^') {
@@ -235,6 +249,8 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
             }
 
             Plugin_035_irSender->sendRaw(buf, idx, IrHz);
+            delete[] buf;
+            buf = nullptr;
             //String line = "";
             //for (int i = 0; i < idx; i++)
             //    line += uint64ToString(buf[i], 10) + ",";
@@ -298,17 +314,18 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
             if (IrType.equals(F("fujitsu_ac")))         parseStringAndSendAirCon(FUJITSU_AC, ircodestr);
             if (IrType.equals(F("kelvinator")))         parseStringAndSendAirCon(KELVINATOR, ircodestr);
             if (IrType.equals(F("daikin")))             parseStringAndSendAirCon(DAIKIN, ircodestr);
+            if (IrType.equals(F("daikin2")))            parseStringAndSendAirCon(DAIKIN2, ircodestr);
             if (IrType.equals(F("gree")))               parseStringAndSendAirCon(GREE, ircodestr);
             if (IrType.equals(F("argo")))               parseStringAndSendAirCon(ARGO, ircodestr);
             if (IrType.equals(F("trotec")))             parseStringAndSendAirCon(TROTEC, ircodestr);
             if (IrType.equals(F("toshiba_ac")))         parseStringAndSendAirCon(TOSHIBA_AC, ircodestr);
             if (IrType.equals(F("haier_ac")))           parseStringAndSendAirCon(HAIER_AC, ircodestr);
+            if (IrType.equals(F("haier_ac_yrw02")))     parseStringAndSendAirCon(HAIER_AC_YRW02, ircodestr);
             if (IrType.equals(F("hitachi_ac")))         parseStringAndSendAirCon(HITACHI_AC, ircodestr);
             if (IrType.equals(F("hitachi_ac1")))        parseStringAndSendAirCon(HITACHI_AC1, ircodestr);
             if (IrType.equals(F("hitachi_ac2")))        parseStringAndSendAirCon(HITACHI_AC2, ircodestr);
             if (IrType.equals(F("electra_ac")))         parseStringAndSendAirCon(ELECTRA_AC, ircodestr);
             if (IrType.equals(F("panasonic_ac")))       parseStringAndSendAirCon(PANASONIC_AC, ircodestr);
-            if (IrType.equals(F("haier_ac_yrw02")))     parseStringAndSendAirCon(HAIER_AC_YRW02, ircodestr);
             if (IrType.equals(F("samsung_ac")))         parseStringAndSendAirCon(SAMSUNG_AC, ircodestr);
             if (IrType.equals(F("whirlpool_ac")))       parseStringAndSendAirCon(WHIRLPOOL_AC, ircodestr);
             if (IrType.equals(F("mwm")))                parseStringAndSendAirCon(MWM, ircodestr);
@@ -333,8 +350,8 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
   return success;
 }
 
-boolean addErrorTrue(const char *str) {
-    addLog(LOG_LEVEL_ERROR, str);
+boolean addErrorTrue() {
+    addLog(LOG_LEVEL_ERROR, F("RAW2: Invalid encoding!"));
     return true;
 }
 
@@ -367,6 +384,9 @@ bool  parseStringAndSendAirCon(const uint16_t irType, const String& str) {
       break;
     case DAIKIN:
       stateSize = kDaikinStateLength;
+      break;
+    case DAIKIN2:
+      stateSize = kDaikin2StateLength;
       break;
     case ELECTRA_AC:
       stateSize = kElectraAcStateLength;
@@ -495,6 +515,11 @@ bool  parseStringAndSendAirCon(const uint16_t irType, const String& str) {
 #if SEND_DAIKIN
     case DAIKIN:
       Plugin_035_irSender->sendDaikin(reinterpret_cast<uint8_t *>(state));
+      break;
+#endif
+#if SEND_DAIKIN2
+    case DAIKIN2:
+      Plugin_035_irSender->sendDaikin2(reinterpret_cast<uint8_t *>(state));
       break;
 #endif
 #if SEND_MITSUBISHI_AC
