@@ -24,8 +24,8 @@
 #define DEFAULT_AP_KEY      "configesp"         // Enter network WPA key for AP (config) mode
 
 // --- Wifi Client Mode -----------------------------------------------------------------------------
-#define DEFAULT_SSID        "ssid"              // Enter your Wifi network SSID
-#define DEFAULT_KEY         "wpakey"            // Enter your Wifi network WPA key
+#define DEFAULT_SSID        "Isserteaux_Indoor"              // Enter your Wifi network SSID
+#define DEFAULT_KEY         "01234567A"            // Enter your Wifi network WPA key
 
 #define DEFAULT_USE_STATIC_IP   false           // (true|false) enabled or disabled static IP
 #define DEFAULT_IP          "192.168.0.50"      // Enter your IP address
@@ -63,8 +63,8 @@
 //   8 = Generic HTTP
 //   9 = FHEM HTTP
 
-#define DEFAULT_PIN_I2C_SDA              4
-#define DEFAULT_PIN_I2C_SCL              5
+#define DEFAULT_PIN_I2C_SDA              -1
+#define DEFAULT_PIN_I2C_SCL              -1
 
 #define DEFAULT_PIN_STATUS_LED           -1
 #define DEFAULT_PIN_STATUS_LED_INVERSED  true
@@ -100,7 +100,7 @@
 #define LOG_TO_SDCARD         4
 #define DEFAULT_SYSLOG_IP                       ""                      // Syslog IP Address
 #define DEFAULT_SYSLOG_LEVEL            0                               // Syslog Log Level
-#define DEFAULT_SERIAL_LOG_LEVEL        0                               // Serial Log Level
+#define DEFAULT_SERIAL_LOG_LEVEL        LOG_LEVEL_INFO                  // Serial Log Level
 #define DEFAULT_WEB_LOG_LEVEL           LOG_LEVEL_INFO                  // Web Log Level
 #define DEFAULT_SD_LOG_LEVEL            0                               // SD Card Log Level
 #define DEFAULT_USE_SD_LOG                      false                   // (true|false) Enable Logging to the SD card

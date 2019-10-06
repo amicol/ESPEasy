@@ -220,6 +220,7 @@ To create/register a plugin, you have to :
     //#define PLUGIN_SET_ONLY_TEMP_HUM
     //#define USES_P021
     //#define USES_P220
+    //#define USES_P221
 #endif
 
 #ifdef PLUGIN_SET_SONOFF_TOUCH
