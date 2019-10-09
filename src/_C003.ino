@@ -52,9 +52,18 @@ bool CPlugin_003(byte function, struct EventStruct *event, String& string)
         break;
       }
 
+    case CPLUGIN_FLUSH:
+      {
+        process_c003_delay_queue();
+        delay(0);
+        break;
+      }
+
   }
   return success;
 }
+
+bool do_process_c003_delay_queue(int controller_number, const C003_queue_element& element, ControllerSettingsStruct& ControllerSettings);
 
 bool do_process_c003_delay_queue(int controller_number, const C003_queue_element& element, ControllerSettingsStruct& ControllerSettings) {
   bool success = false;

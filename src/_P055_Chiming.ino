@@ -255,7 +255,7 @@ boolean Plugin_055(byte function, struct EventStruct *event, String& string)
 
           if (Plugin_055_Data->chimeClock)
           {
-            char tmpString[8];
+            char tmpString[8] = {0};
 
             sprintf_P(tmpString, PSTR("%02d%02d"), hours, minutes);
             if (Plugin_055_ReadChime(tmpString, tokens))
@@ -461,7 +461,7 @@ void Plugin_055_WriteChime(const String& name, const String& tokens)
   log += fileName;
   log += ' ';
 
-  fs::File f = SPIFFS.open(fileName, "w");
+  fs::File f = tryOpenFile(fileName, "w");
   if (f)
   {
     f.print(tokens);
@@ -484,9 +484,10 @@ byte Plugin_055_ReadChime(const String& name, String& tokens)
   log += ' ';
 
   tokens = "";
-  fs::File f = SPIFFS.open(fileName, "r+");
+  fs::File f = tryOpenFile(fileName, "r");
   if (f)
   {
+    tokens.reserve(f.size());
     char c;
     while (f.available())
     {

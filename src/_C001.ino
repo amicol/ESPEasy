@@ -79,6 +79,7 @@ bool CPlugin_001(byte function, struct EventStruct *event, String& string)
             case SENSOR_TYPE_TEMP_EMPTY_BARO:
             case SENSOR_TYPE_TEMP_HUM_BARO:
             case SENSOR_TYPE_WIND:
+            case SENSOR_TYPE_STRING:
             default:
               url = F("/json.htm?type=command&param=udevice&idx=");
               url += event->idx;
@@ -105,9 +106,18 @@ bool CPlugin_001(byte function, struct EventStruct *event, String& string)
         }
         break;
       }
+
+    case CPLUGIN_FLUSH:
+      {
+        process_c001_delay_queue();
+        delay(0);
+        break;
+      }
   }
   return success;
 }
+
+bool do_process_c001_delay_queue(int controller_number, const C001_queue_element& element, ControllerSettingsStruct& ControllerSettings);
 
 bool do_process_c001_delay_queue(int controller_number, const C001_queue_element& element, ControllerSettingsStruct& ControllerSettings) {
   WiFiClient client;
