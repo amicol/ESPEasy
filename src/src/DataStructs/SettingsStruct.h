@@ -4,6 +4,7 @@
 
 
 #include "../DataStructs/ESPEasyLimits.h"
+#include "../Globals/Plugins.h"
 
 
 /*********************************************************************************************\
@@ -41,6 +42,11 @@ class SettingsStruct_tmpl
   bool gratuitousARP();
   void gratuitousARP(bool value);
 
+  // Be a bit more tolerant when parsing the last argument of a command.
+  // See: https://github.com/letscontrolit/ESPEasy/issues/2724
+  bool TolerantLastArgParse();
+  void TolerantLastArgParse(bool value);
+
   void validate();
 
   bool networkSettingsEmpty() const;
@@ -63,7 +69,7 @@ class SettingsStruct_tmpl
 
   void clearAll();
 
-  void clearTask(byte task);
+  void clearTask(taskIndex_t task);
 
   unsigned long PID;
   int           Version;
@@ -76,6 +82,7 @@ class SettingsStruct_tmpl
   byte          Unit;
   char          Name[26];
   char          NTPHost[64];
+  // FIXME TD-er: Issue #2690
   unsigned long Delay;              // Sleep time in seconds
   int8_t        Pin_i2c_sda;
   int8_t        Pin_i2c_scl;
@@ -90,7 +97,7 @@ class SettingsStruct_tmpl
   byte          SDLogLevel;
   unsigned long BaudRate;
   unsigned long MessageDelay;
-  byte          deepSleep;   // 0 = Sleep Disabled, else time awake from sleep in seconds
+  byte          deepSleep_wakeTime;   // 0 = Sleep Disabled, else time awake from sleep in seconds
   boolean       CustomCSS;
   boolean       DST;
   byte          WDI2CAddress;
@@ -106,6 +113,7 @@ class SettingsStruct_tmpl
   boolean       InitSPI;
   byte          Protocol[CONTROLLER_MAX];
   byte          Notification[NOTIFICATION_MAX]; //notifications, point to a NPLUGIN id
+  // FIXME TD-er: Must change to pluginID_t, but then also another check must be added since changing the pluginID_t will also render settings incompatible
   byte          TaskDeviceNumber[N_TASKS]; // The "plugin number" set at as task (e.g. 4 for P004_dallas)
   unsigned int  OLD_TaskDeviceID[N_TASKS];  //UNUSED: this can be removed
   union {
