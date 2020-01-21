@@ -9,32 +9,33 @@
 #define PLUGIN_ID_220        220
 #define PLUGIN_NAME_220       "Regulator-3WV"
 #define PLUGIN_VALUENAME1_220 "Circulator"
-#define PLUGIN_VALUENAME2_220 "3WV Pos"
-#define PLUGIN_VALUENAME3_220 "3WV Target "
+#define PLUGIN_VALUENAME2_220 "3WV_Pos"
+#define PLUGIN_VALUENAME3_220 "3WV_Target"
 #define MIN_STEP 2
 #define MAX_SERVO 100
 #define MAX_3WAY 100
 #define INTERVAL_REG 45000      // Interval between 3VW temperature checks
 #define INTERVAL_MAIN_REG 900000        // Interval between Ambiant temperature checks
 
-
-#define main_PID_Kp 2  //main PID coeff
-#define main_PID_Ki 2
+#define main_PID_Kp 4  //main PID coeff
+#define main_PID_Ki 4
 #define main_PID_Kd 0
-#define way3_PID_Kp .2 //3 way valve PID coeff
-#define way3_PID_Ki 5
-#define way3_PID_Kd .1
+#define way3_PID_Kp 1.9 //3 way valve PID coeff
+#define way3_PID_Ki 1
+#define way3_PID_Kd .2
 
 
 double Output;
 //double input;
 double target_3WV;
-PID *way3_PID;
+//PID *way3_PID;
 //double main_input;
-PID *main_PID;
+//PID *main_PID;
 double ambient_temp;
 double input_temp;
 double target;
+PID main_PID(&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, DIRECT);
+PID way3_PID(&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
 unsigned long stopServoAt;
 unsigned long lastRegulation;
 unsigned long last_main_Regulation;
@@ -55,11 +56,11 @@ bool regulate_on = 1;
 // 			way3_PID = new PID (&input, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
 //
 // 			//turn the PID on
-// 	 		way3_PID->SetMode(AUTOMATIC);
-// 			main_PID->SetMode(AUTOMATIC);
+// 	 		way3_PID.SetMode(AUTOMATIC);
+// 			main_PID.SetMode(AUTOMATIC);
 //
-// 			way3_PID->SetOutputLimits(0, MAX_3WAY);
-// 			main_PID->SetOutputLimits(15., PCONFIG_FLOAT(1));
+// 			way3_PID.SetOutputLimits(0, MAX_3WAY);
+// 			main_PID.SetOutputLimits(15., PCONFIG_FLOAT(1));
 //
 //
 // 			adjust_PID();
@@ -82,10 +83,10 @@ bool regulate_on = 1;
 void reset_PID(struct EventStruct *event)
 {
 		start_circulator = true;
-		way3_PID->SetMode(MANUAL);
+		way3_PID.SetMode(MANUAL);
 		Output = 0;
 		setServoTo(0,event);
-		way3_PID->SetMode(AUTOMATIC);
+		way3_PID.SetMode(AUTOMATIC);
 }
 void update(struct EventStruct *event)
 {
@@ -110,7 +111,7 @@ void update(struct EventStruct *event)
 void adjust_PID(struct EventStruct *event)
 {
 			//main_input = ambient_temp;
-			main_PID->Compute();
+			main_PID.Compute();
 
 			last_main_Regulation = millis();
 }
@@ -121,7 +122,7 @@ void regulate(struct EventStruct *event)
 				if (digitalRead(CONFIG_PIN2) != HIGH)
 			{
 						//input = input_temp;
-						way3_PID->Compute();
+						way3_PID.Compute();
             String log2 = F("target_3WV :");
             log2+=target_3WV;
             log2+= F("\n Input:");
@@ -279,8 +280,8 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
     case PLUGIN_GET_DEVICEGPIONAMES:
       {
         event->String1 = formatGpioName_output(F("Circulator"));
-        event->String2 = formatGpioName_output(F("3WV On/Off"));
-        event->String3 = formatGpioName_output(F("3WV Direction"));
+        event->String2 = formatGpioName_output(F("3WV_On_Off"));
+        event->String3 = formatGpioName_output(F("3WV_Direction"));
         break;
       }
 
@@ -398,18 +399,18 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
 
         	    target_3WV = ambient_temp;
         			//main_input = ambient_temp;
-        			main_PID = new PID (&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, DIRECT);
+        			//main_PID = new PID (&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, DIRECT);
 
         			Output = 0;
         			//input = input_temp;
-        			way3_PID = new PID (&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
+        			//way3_PID = new PID (&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
 
         			//turn the PID on
-        	 		way3_PID->SetMode(AUTOMATIC);
-        			main_PID->SetMode(AUTOMATIC);
+        	 		way3_PID.SetMode(AUTOMATIC);
+        			main_PID.SetMode(AUTOMATIC);
 
-        			way3_PID->SetOutputLimits(0, MAX_3WAY);
-        			main_PID->SetOutputLimits(15., PCONFIG_FLOAT(1));
+        			way3_PID.SetOutputLimits(0, MAX_3WAY);
+        			main_PID.SetOutputLimits(15., PCONFIG_FLOAT(1));
 
               //stopServoAt = millis() + TIME_TO_RESET;
               digitalWrite(CONFIG_PIN3,LOW);
@@ -434,7 +435,12 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         // we're checking a var from another task, so calculate that basevar
         byte TaskIndex = PCONFIG(0);
         byte BaseVarIndex = TaskIndex * VARS_PER_TASK + PCONFIG(1);
-        ambient_temp = UserVar[BaseVarIndex];
+        if (ambient_temp != UserVar[BaseVarIndex]){
+          ambient_temp = UserVar[BaseVarIndex];
+          adjust_PID(event);
+          regulate(event);
+        }
+        
 
         byte TaskIndex2 = PCONFIG(2);
         byte BaseVarIndex2 = TaskIndex2 * VARS_PER_TASK + PCONFIG(3);
@@ -452,22 +458,21 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
               addLog(LOG_LEVEL_INFO, log3);
 
           target = UserVar[BaseVarIndex3];
-          if (target==0)
+        }
+        if (target==0)
           {
             regulate_on=0;
           }
-          else
+        else
           {
             if (regulate_on==0)
             {
-                regulate_on=1;
-                reset_PID(event);
+              regulate_on=1;
+              reset_PID(event);
+              adjust_PID(event);
+              regulate(event);
             }
-          }
-          adjust_PID(event);
-          regulate(event);
         }
-
         update(event);
 
         // if (state != switchstate[event->TaskIndex])
