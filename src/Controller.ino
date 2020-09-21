@@ -1,8 +1,18 @@
+#include "ESPEasy_common.h"
+#include "ESPEasy_fdwdecl.h"
+#include "ESPEasy_plugindefs.h"
+#include "src/ControllerQueue/MQTT_queue_element.h"
+#include "src/DataStructs/ControllerSettingsStruct.h"
+#include "src/DataStructs/ESPEasy_EventStruct.h"
+#include "src/Globals/CPlugins.h"
 #include "src/Globals/Device.h"
+#include "src/Globals/ESPEasy_Scheduler.h"
+#include "src/Globals/MQTT.h"
 #include "src/Globals/Plugins.h"
+#include "src/Globals/Protocol.h"
+#include "_CPlugin_Helper.h"
 
 // ********************************************************************************
-
 // Interface for Sending to Controllers
 // ********************************************************************************
 void sendData(struct EventStruct *event)
@@ -15,36 +25,19 @@ void sendData(struct EventStruct *event)
     createRuleEvents(event);
   }
 
-  if (Settings.UseValueLogger && Settings.InitSPI && (Settings.Pin_sd_cs >= 0)) {
+  if (Settings.UseValueLogger && Settings.InitSPI>0 && (Settings.Pin_sd_cs >= 0)) {
     SendValueLogger(event->TaskIndex);
   }
 
-  //  if (!Settings.TaskDeviceSendData[event->TaskIndex])
-  //    return false;
-
-  /*
-     // Disabed for now, using buffers at controller side.
-     if (Settings.MessageDelay != 0)
-     {
-      const long dif = timePassedSince(lastSend);
-      if (dif > 0 && dif < static_cast<long>(Settings.MessageDelay))
-      {
-        uint16_t delayms = Settings.MessageDelay - dif;
-        //this is logged nowhere else, so might as well disable it here also:
-        // addLog(LOG_LEVEL_DEBUG_MORE, String(F("CTRL : Message delay (ms): "))+delayms);
-
-       delayBackground(delayms);
-
-        // unsigned long timer = millis() + delayms;
-        // while (!timeOutReached(timer))
-        //   backgroundtasks();
-      }
-     }
-   */
-
   LoadTaskSettings(event->TaskIndex); // could have changed during background tasks.
+  if (event->sensorType == SENSOR_TYPE_NONE) {
+    const deviceIndex_t DeviceIndex = getDeviceIndex_from_TaskIndex(event->TaskIndex);
+    if (validDeviceIndex(DeviceIndex)) {
+      event->sensorType = Device[DeviceIndex].VType;
+    }
+  }
 
-  for (byte x = 0; x < CONTROLLER_MAX; x++)
+  for (controllerIndex_t x = 0; x < CONTROLLER_MAX; x++)
   {
     event->ControllerIndex = x;
     event->idx             = Settings.TaskDeviceID[x][event->TaskIndex];
@@ -53,17 +46,17 @@ void sendData(struct EventStruct *event)
         Settings.ControllerEnabled[event->ControllerIndex] &&
         Settings.Protocol[event->ControllerIndex])
     {
-      event->ProtocolIndex = getProtocolIndex(Settings.Protocol[event->ControllerIndex]);
+      protocolIndex_t ProtocolIndex = getProtocolIndex_from_ControllerIndex(event->ControllerIndex);
 
       if (validUserVar(event)) {
         String dummy;
-        CPluginCall(event->ProtocolIndex, CPLUGIN_PROTOCOL_SEND, event, dummy);
+        CPluginCall(ProtocolIndex, CPlugin::Function::CPLUGIN_PROTOCOL_SEND, event, dummy);
       }
 #ifndef BUILD_NO_DEBUG
       else {
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
           String log = F("Invalid value detected for controller ");
-          log += getCPluginNameFromProtocolIndex(event->ProtocolIndex);
+          log += getCPluginNameFromProtocolIndex(ProtocolIndex);
           addLog(LOG_LEVEL_DEBUG, log);
         }
       }
@@ -81,10 +74,7 @@ void sendData(struct EventStruct *event)
 }
 
 bool validUserVar(struct EventStruct *event) {
-  const deviceIndex_t DeviceIndex = getDeviceIndex_from_TaskIndex(event->TaskIndex);
-  if (!validDeviceIndex(DeviceIndex)) return false;
-
-  switch (Device[DeviceIndex].VType) {
+  switch (event->sensorType) {
     case SENSOR_TYPE_LONG:    return true;
     case SENSOR_TYPE_STRING:  return true; // FIXME TD-er: Must look at length of event->String2 ?
     default:
@@ -108,9 +98,9 @@ bool validUserVar(struct EventStruct *event) {
 // handle MQTT messages
 void callback(char *c_topic, byte *b_payload, unsigned int length) {
   statusLED(true);
-  int enabledMqttController = firstEnabledMQTTController();
+  controllerIndex_t enabledMqttController = firstEnabledMQTT_ControllerIndex();
 
-  if (enabledMqttController < 0) {
+  if (!validControllerIndex(enabledMqttController)) {
     addLog(LOG_LEVEL_ERROR, F("MQTT : No enabled MQTT controller"));
     return;
   }
@@ -121,32 +111,12 @@ void callback(char *c_topic, byte *b_payload, unsigned int length) {
     return;
   }
 
-  struct EventStruct TempEvent;
-
   // TD-er: This one cannot set the TaskIndex, but that may seem to work out.... hopefully.
-  TempEvent.String1 = c_topic;
-  TempEvent.String2.reserve(length);
-
-  for (unsigned int i = 0; i < length; ++i) {
-    char c = static_cast<char>(*(b_payload + i));
-    TempEvent.String2 += c;
-  }
-
-  /*
-     if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
-      String log;
-      log=F("MQTT : Topic: ");
-      log+=c_topic;
-      addLog(LOG_LEVEL_DEBUG_MORE, log);
-
-      log=F("MQTT : Payload: ");
-      log+=TempEvent.String2;
-      addLog(LOG_LEVEL_DEBUG_MORE, log);
-     }
-   */
-
-  byte ProtocolIndex = getProtocolIndex(Settings.Protocol[enabledMqttController]);
-  schedule_controller_event_timer(ProtocolIndex, CPLUGIN_PROTOCOL_RECV, &TempEvent);
+  protocolIndex_t ProtocolIndex = getProtocolIndex_from_ControllerIndex(enabledMqttController);
+  Scheduler.schedule_mqtt_controller_event_timer(
+    ProtocolIndex, 
+    CPlugin::Function::CPLUGIN_PROTOCOL_RECV,
+    c_topic, b_payload, length);
 }
 
 /*********************************************************************************************\
@@ -164,10 +134,14 @@ void MQTTDisconnect()
 /*********************************************************************************************\
 * Connect to MQTT message broker
 \*********************************************************************************************/
-bool MQTTConnect(int controller_idx)
+bool MQTTConnect(controllerIndex_t controller_idx)
 {
   ++mqtt_reconnect_count;
   MakeControllerSettings(ControllerSettings);
+  if (!AllocatedControllerSettings()) {
+    addLog(LOG_LEVEL_ERROR, F("MQTT : Cannot connect, out of RAM"));
+    return false;
+  }
   LoadControllerSettings(controller_idx, ControllerSettings);
 
   if (!ControllerSettings.checkHostReachable(true)) {
@@ -178,7 +152,8 @@ bool MQTTConnect(int controller_idx)
     MQTTclient.disconnect();
   }
   updateMQTTclient_connected();
-  mqtt = WiFiClient(); // workaround see: https://github.com/esp8266/Arduino/issues/4497#issuecomment-373023864
+//  mqtt = WiFiClient(); // workaround see: https://github.com/esp8266/Arduino/issues/4497#issuecomment-373023864
+  yield();
   mqtt.setTimeout(ControllerSettings.ClientTimeout);
   MQTTclient.setClient(mqtt);
 
@@ -190,85 +165,43 @@ bool MQTTConnect(int controller_idx)
   MQTTclient.setCallback(callback);
 
   // MQTT needs a unique clientname to subscribe to broker
-  String clientid;
+  String clientid = getMQTTclientID(ControllerSettings);
 
-  if (Settings.MQTTUseUnitNameAsClientId) {
-    clientid = Settings.Name;
+  String  LWTTopic             = getLWT_topic(ControllerSettings);
+  String  LWTMessageDisconnect = getLWT_messageDisconnect(ControllerSettings);
+  bool    MQTTresult           = false;
+  uint8_t willQos              = 0;
+  bool    willRetain           = ControllerSettings.mqtt_willRetain() && ControllerSettings.mqtt_sendLWT();
+  bool    cleanSession         = ControllerSettings.mqtt_cleanSession(); // As suggested here:
+                                                                         // https://github.com/knolleary/pubsubclient/issues/458#issuecomment-493875150
 
-    if (Settings.Unit != 0) { // only append non-zero unit number
-      clientid += '_';
-      clientid += Settings.Unit;
-    }
-  }
-  else {
-    clientid  = F("ESPClient_");
-    clientid += WiFi.macAddress();
-  }
-  clientid.replace(' ', '_'); // Make sure no spaces are present in the client ID
-
-  if ((wifi_reconnects >= 1) && Settings.uniqueMQTTclientIdReconnect()) {
-    // Work-around for 'lost connections' to the MQTT broker.
-    // If the broker thinks the connection is still alive, a reconnect from the
-    // client will be refused.
-    // To overcome this issue, append the number of reconnects to the client ID to
-    // make it different from the previous one.
-    clientid += '_';
-    clientid += wifi_reconnects;
-  }
-
-  String LWTTopic = ControllerSettings.MQTTLwtTopic;
-
-  if (LWTTopic.length() == 0)
-  {
-    LWTTopic  = ControllerSettings.Subscribe;
-    LWTTopic += F("/LWT");
-  }
-  LWTTopic.replace(F("/#"), F("/status"));
-  parseSystemVariables(LWTTopic, false);
-
-  String LWTMessageConnect = ControllerSettings.LWTMessageConnect;
-
-  if (LWTMessageConnect.length() == 0) {
-    LWTMessageConnect = F(DEFAULT_MQTT_LWT_CONNECT_MESSAGE);
-  }
-  parseSystemVariables(LWTMessageConnect, false);
-
-  String LWTMessageDisconnect = ControllerSettings.LWTMessageDisconnect;
-
-  if (LWTMessageDisconnect.length() == 0) {
-    LWTMessageDisconnect = F(DEFAULT_MQTT_LWT_DISCONNECT_MESSAGE);
-  }
-  parseSystemVariables(LWTMessageDisconnect, false);
-
-  boolean MQTTresult   = false;
-  uint8_t willQos      = 0;
-  boolean willRetain   = true;
-  boolean cleanSession = false; // As suggested here: https://github.com/knolleary/pubsubclient/issues/458#issuecomment-493875150
-
-  if ((SecuritySettings.ControllerUser[controller_idx] != 0) && (SecuritySettings.ControllerPassword[controller_idx] != 0)) {
+  if (hasControllerCredentialsSet(controller_idx, ControllerSettings)) {
     MQTTresult =
       MQTTclient.connect(clientid.c_str(),
-                         SecuritySettings.ControllerUser[controller_idx],
-                         SecuritySettings.ControllerPassword[controller_idx],
-                         LWTTopic.c_str(),
+                         getControllerUser(controller_idx, ControllerSettings).c_str(),
+                         getControllerPass(controller_idx, ControllerSettings).c_str(),
+                         ControllerSettings.mqtt_sendLWT() ? LWTTopic.c_str() : nullptr,
                          willQos,
                          willRetain,
-                         LWTMessageDisconnect.c_str(),
+                         ControllerSettings.mqtt_sendLWT() ? LWTMessageDisconnect.c_str() : nullptr,
                          cleanSession);
   } else {
     MQTTresult = MQTTclient.connect(clientid.c_str(),
                                     nullptr,
                                     nullptr,
-                                    LWTTopic.c_str(),
+                                    ControllerSettings.mqtt_sendLWT() ? LWTTopic.c_str() : nullptr,
                                     willQos,
                                     willRetain,
-                                    LWTMessageDisconnect.c_str(),
+                                    ControllerSettings.mqtt_sendLWT() ? LWTMessageDisconnect.c_str() : nullptr,
                                     cleanSession);
   }
   delay(0);
 
+
+  byte controller_number = Settings.Protocol[controller_idx];
+  count_connection_results(MQTTresult, F("MQTT : Broker "), controller_number);
+
   if (!MQTTresult) {
-    addLog(LOG_LEVEL_ERROR, F("MQTT : Failed to connect to broker"));
     MQTTclient.disconnect();
     updateMQTTclient_connected();
     return false;
@@ -283,152 +216,272 @@ bool MQTTConnect(int controller_idx)
   log += subscribeTo;
   addLog(LOG_LEVEL_INFO, log);
 
-  if (MQTTclient.publish(LWTTopic.c_str(), LWTMessageConnect.c_str(), 1)) {
-    updateMQTTclient_connected();
-    statusLED(true);
-    mqtt_reconnect_count = 0;
+  updateMQTTclient_connected();
+  statusLED(true);
+  mqtt_reconnect_count = 0;
 
-    // call all installed controller to publish autodiscover data
-    if (MQTTclient_should_reconnect) { CPluginCall(CPLUGIN_GOT_CONNECTED, 0); }
-    MQTTclient_should_reconnect = false;
-    return true; // end loop if succesfull
+  // call all installed controller to publish autodiscover data
+  if (MQTTclient_should_reconnect) { CPluginCall(CPlugin::Function::CPLUGIN_GOT_CONNECTED, 0); }
+  MQTTclient_should_reconnect = false;
+
+  if (ControllerSettings.mqtt_sendLWT()) {
+    String LWTMessageConnect = getLWT_messageConnect(ControllerSettings);
+
+    if (!MQTTclient.publish(LWTTopic.c_str(), LWTMessageConnect.c_str(), willRetain)) {
+      MQTTclient_must_send_LWT_connected = true;
+    }
   }
-  return false;
+
+  return true;
+}
+
+String getMQTTclientID(const ControllerSettingsStruct& ControllerSettings) {
+  String clientid = ControllerSettings.ClientID;
+
+  if (clientid.length() == 0) {
+    // Try to generate some default
+    clientid = F(CONTROLLER_DEFAULT_CLIENTID);
+  }
+  parseSystemVariables(clientid, false);
+  clientid.replace(' ', '_'); // Make sure no spaces are present in the client ID
+
+  if ((wifi_reconnects >= 1) && ControllerSettings.mqtt_uniqueMQTTclientIdReconnect()) {
+    // Work-around for 'lost connections' to the MQTT broker.
+    // If the broker thinks the connection is still alive, a reconnect from the
+    // client will be refused.
+    // To overcome this issue, append the number of reconnects to the client ID to
+    // make it different from the previous one.
+    clientid += '_';
+    clientid += wifi_reconnects;
+  }
+  return clientid;
 }
 
 /*********************************************************************************************\
 * Check connection MQTT message broker
 \*********************************************************************************************/
-bool MQTTCheck(int controller_idx)
+bool MQTTCheck(controllerIndex_t controller_idx)
 {
-  if (!WiFiConnected(10)) {
+  if (!NetworkConnected(10)) {
     return false;
   }
-  byte ProtocolIndex = getProtocolIndex(Settings.Protocol[controller_idx]);
+  protocolIndex_t ProtocolIndex = getProtocolIndex_from_ControllerIndex(controller_idx);
+
+  if (!validProtocolIndex(ProtocolIndex)) {
+    return false;
+  }
 
   if (Protocol[ProtocolIndex].usesMQTT)
   {
+    bool mqtt_sendLWT = false;
+    String LWTTopic, LWTMessageConnect;
+    bool willRetain = false;
+    {
+      MakeControllerSettings(ControllerSettings);
+      if (!AllocatedControllerSettings()) {
+        addLog(LOG_LEVEL_ERROR, F("MQTT : Cannot check, out of RAM"));
+        return false;
+      }
+
+      LoadControllerSettings(controller_idx, ControllerSettings);
+
+      // FIXME TD-er: Is this still needed?
+      /*
+      #ifdef USES_ESPEASY_NOW
+      if (!MQTTclient.connected()) {
+        if (ControllerSettings.enableESPEasyNowFallback()) {
+          return true;
+        }
+      }
+      #endif
+      */
+
+      if (!ControllerSettings.isSet()) {
+        return true;
+      }
+
+      if (ControllerSettings.mqtt_sendLWT()) {
+        mqtt_sendLWT = true;
+        LWTTopic          = getLWT_topic(ControllerSettings);
+        LWTMessageConnect = getLWT_messageConnect(ControllerSettings);
+        willRetain        = ControllerSettings.mqtt_willRetain();
+      }
+    }
     if (MQTTclient_should_reconnect || !MQTTclient.connected())
     {
       if (MQTTclient_should_reconnect) {
         addLog(LOG_LEVEL_ERROR, F("MQTT : Intentional reconnect"));
-      } else {
-        connectionFailures += 2;
       }
       return MQTTConnect(controller_idx);
-    } else if (connectionFailures) {
-      connectionFailures--;
+    }
+
+    if (MQTTclient_must_send_LWT_connected) {
+      if (mqtt_sendLWT) {
+        if (MQTTclient.publish(LWTTopic.c_str(), LWTMessageConnect.c_str(), willRetain)) {
+          MQTTclient_must_send_LWT_connected = false;
+        }
+      } else {
+        MQTTclient_must_send_LWT_connected = false;
+      }
     }
   }
 
   // When no MQTT protocol is enabled, all is fine.
   return true;
 }
-#endif //USES_MQTT
+
+
+String getLWT_topic(const ControllerSettingsStruct& ControllerSettings) {
+  String LWTTopic;
+
+  if (ControllerSettings.mqtt_sendLWT()) {
+    LWTTopic = ControllerSettings.MQTTLwtTopic;
+
+    if (LWTTopic.length() == 0)
+    {
+      LWTTopic  = ControllerSettings.Subscribe;
+      LWTTopic += F("/LWT");
+    }
+    LWTTopic.replace(F("/#"), F("/status"));
+    parseSystemVariables(LWTTopic, false);
+  }
+  return LWTTopic;
+}
+
+String getLWT_messageConnect(const ControllerSettingsStruct& ControllerSettings) {
+  String LWTMessageConnect;
+
+  if (ControllerSettings.mqtt_sendLWT()) {
+    LWTMessageConnect = ControllerSettings.LWTMessageConnect;
+
+    if (LWTMessageConnect.length() == 0) {
+      LWTMessageConnect = F(DEFAULT_MQTT_LWT_CONNECT_MESSAGE);
+    }
+    parseSystemVariables(LWTMessageConnect, false);
+  }
+  return LWTMessageConnect;
+}
+
+String getLWT_messageDisconnect(const ControllerSettingsStruct& ControllerSettings) {
+  String LWTMessageDisconnect;
+
+  if (ControllerSettings.mqtt_sendLWT()) {
+    LWTMessageDisconnect = ControllerSettings.LWTMessageDisconnect;
+
+    if (LWTMessageDisconnect.length() == 0) {
+      LWTMessageDisconnect = F(DEFAULT_MQTT_LWT_DISCONNECT_MESSAGE);
+    }
+    parseSystemVariables(LWTMessageDisconnect, false);
+  }
+  return LWTMessageDisconnect;
+}
+
+#endif // USES_MQTT
 
 /*********************************************************************************************\
 * Send status info to request source
 \*********************************************************************************************/
-void SendStatusOnlyIfNeeded(byte eventSource, bool param1, uint32_t key, const String& param2, int16_t param3) {
+void SendStatusOnlyIfNeeded(EventValueSource::Enum eventSource, bool param1, uint32_t key, const String& param2, int16_t param3) {
   if (SourceNeedsStatusUpdate(eventSource)) {
     SendStatus(eventSource, getPinStateJSON(param1, key, param2, param3));
   }
 }
 
-bool SourceNeedsStatusUpdate(byte eventSource)
+bool SourceNeedsStatusUpdate(EventValueSource::Enum eventSource)
 {
   switch (eventSource) {
-    case VALUE_SOURCE_HTTP:
-    case VALUE_SOURCE_SERIAL:
-    case VALUE_SOURCE_MQTT:
-    case VALUE_SOURCE_WEB_FRONTEND:
+    case EventValueSource::Enum::VALUE_SOURCE_HTTP:
+    case EventValueSource::Enum::VALUE_SOURCE_SERIAL:
+    case EventValueSource::Enum::VALUE_SOURCE_MQTT:
+    case EventValueSource::Enum::VALUE_SOURCE_WEB_FRONTEND:
       return true;
+
+    default: 
+      break;
   }
   return false;
 }
 
-void SendStatus(byte source, const String& status)
+void SendStatus(EventValueSource::Enum source, const String& status)
 {
   switch (source)
   {
-    case VALUE_SOURCE_HTTP:
-    case VALUE_SOURCE_WEB_FRONTEND:
+    case EventValueSource::Enum::VALUE_SOURCE_HTTP:
+    case EventValueSource::Enum::VALUE_SOURCE_WEB_FRONTEND:
 
       if (printToWeb) {
         printWebString += status;
       }
       break;
 #ifdef USES_MQTT
-    case VALUE_SOURCE_MQTT:
+    case EventValueSource::Enum::VALUE_SOURCE_MQTT:
       MQTTStatus(status);
       break;
 #endif //USES_MQTT
-    case VALUE_SOURCE_SERIAL:
+    case EventValueSource::Enum::VALUE_SOURCE_SERIAL:
       serialPrintln(status);
+      break;
+
+    default: 
       break;
   }
 }
 
 #ifdef USES_MQTT
-bool MQTTpublish(int controller_idx, const char *topic, const char *payload, boolean retained)
-{
-  {
-    MQTT_queue_element dummy_element(MQTT_queue_element(controller_idx, "", "", retained));
-    if (MQTTDelayHandler.queueFull(dummy_element)) {
-      // The queue is full, try to make some room first.
-      addLog(LOG_LEVEL_DEBUG, F("MQTT : Extra processMQTTdelayQueue()"));
-      processMQTTdelayQueue();
-    }
+bool MQTT_queueFull(controllerIndex_t controller_idx) {
+  if (MQTTDelayHandler == nullptr) {
+    return true;
   }
-  const bool success = MQTTDelayHandler.addToQueue(MQTT_queue_element(controller_idx, topic, payload, retained));
+  MQTT_queue_element dummy_element;
+  dummy_element.controller_idx = controller_idx;
+  if (MQTTDelayHandler->queueFull(dummy_element)) {
+    // The queue is full, try to make some room first.
+    processMQTTdelayQueue();
+    return MQTTDelayHandler->queueFull(dummy_element);
+  }
+  return false;
+}
 
+bool MQTTpublish(controllerIndex_t controller_idx, const char *topic, const char *payload, bool retained)
+{
+  if (MQTTDelayHandler == nullptr) {
+    return false;
+  }
+  if (MQTT_queueFull(controller_idx)) {
+    return false;
+  }
+  const bool success = MQTTDelayHandler->addToQueue(MQTT_queue_element(controller_idx, topic, payload, retained));
   scheduleNextMQTTdelayQueue();
   return success;
 }
 
-void scheduleNextMQTTdelayQueue() {
-  scheduleNextDelayQueue(TIMER_MQTT_DELAY_QUEUE, MQTTDelayHandler.getNextScheduleTime());
-}
-
-void processMQTTdelayQueue() {
-  START_TIMER;
-  MQTT_queue_element *element(MQTTDelayHandler.getNext());
-
-  if (element == NULL) { return; }
-
-  if (MQTTclient.publish(element->_topic.c_str(), element->_payload.c_str(), element->_retained)) {
-    MQTTDelayHandler.markProcessed(true);
-  } else {
-    MQTTDelayHandler.markProcessed(false);
-#ifndef BUILD_NO_DEBUG
-
-    if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
-      String log = F("MQTT : process MQTT queue not published, ");
-      log += MQTTDelayHandler.sendQueue.size();
-      log += F(" items left in queue");
-      addLog(LOG_LEVEL_DEBUG, log);
-    }
-#endif // ifndef BUILD_NO_DEBUG
-  }
-  setIntervalTimerOverride(TIMER_MQTT, 10); // Make sure the MQTT is being processed as soon as possible.
-  scheduleNextMQTTdelayQueue();
-  STOP_TIMER(MQTT_DELAY_QUEUE);
-}
 
 /*********************************************************************************************\
 * Send status info back to channel where request came from
 \*********************************************************************************************/
 void MQTTStatus(const String& status)
 {
-  int enabledMqttController = firstEnabledMQTTController();
+  controllerIndex_t enabledMqttController = firstEnabledMQTT_ControllerIndex();
 
-  if (enabledMqttController >= 0) {
-    MakeControllerSettings(ControllerSettings);
-    LoadControllerSettings(enabledMqttController, ControllerSettings);
-    String pubname = ControllerSettings.Subscribe;
+  if (validControllerIndex(enabledMqttController)) {
+    String pubname;
+    bool mqtt_retainFlag;
+    {
+      // Place the ControllerSettings in a scope to free the memory as soon as we got all relevant information.
+      MakeControllerSettings(ControllerSettings);
+      if (!AllocatedControllerSettings()) {
+        addLog(LOG_LEVEL_ERROR, F("MQTT : Cannot send status, out of RAM"));
+        return;
+      }
+
+      LoadControllerSettings(enabledMqttController, ControllerSettings);
+      pubname = ControllerSettings.Publish;
+      mqtt_retainFlag = ControllerSettings.mqtt_retainFlag();
+    }
+
     pubname.replace(F("/#"), F("/status"));
     parseSystemVariables(pubname, false);
-    MQTTpublish(enabledMqttController, pubname.c_str(), status.c_str(), Settings.MQTTRetainFlag);
+    MQTTpublish(enabledMqttController, pubname.c_str(), status.c_str(), mqtt_retainFlag);
   }
 }
 #endif //USES_MQTT
@@ -448,7 +501,7 @@ void MQTTStatus(const String& status)
 
 
 /*********************************************************************************************\
- * send specific sensor task data
+ * send specific sensor task data, effectively calling PluginCall(PLUGIN_READ...)
 \*********************************************************************************************/
 void SensorSendTask(taskIndex_t TaskIndex)
 {
@@ -484,21 +537,23 @@ void SensorSendTask(taskIndex_t TaskIndex)
 
     if (success)
     {
-      START_TIMER;
-      for (byte varNr = 0; varNr < VARS_PER_TASK; varNr++)
-      {
-        if (ExtraTaskSettings.TaskDeviceFormula[varNr][0] != 0)
+      if (Device[DeviceIndex].FormulaOption) {
+        START_TIMER;
+        for (byte varNr = 0; varNr < VARS_PER_TASK; varNr++)
         {
-          String formula = ExtraTaskSettings.TaskDeviceFormula[varNr];
-          formula.replace(F("%pvalue%"), String(preValue[varNr]));
-          formula.replace(F("%value%"), String(UserVar[varIndex + varNr]));
-          float result = 0;
-          byte error = Calculate(formula.c_str(), &result);
-          if (error == 0)
-            UserVar[varIndex + varNr] = result;
+          if (ExtraTaskSettings.TaskDeviceFormula[varNr][0] != 0)
+          {
+            String formula = ExtraTaskSettings.TaskDeviceFormula[varNr];
+            formula.replace(F("%pvalue%"), String(preValue[varNr]));
+            formula.replace(F("%value%"), String(UserVar[varIndex + varNr]));
+            float result = 0;
+            byte error = Calculate(formula.c_str(), &result);
+            if (error == 0)
+              UserVar[varIndex + varNr] = result;
+          }
         }
+        STOP_TIMER(COMPUTE_FORMULA_STATS);
       }
-      STOP_TIMER(COMPUTE_FORMULA_STATS);
       sendData(&TempEvent);
     }
   }

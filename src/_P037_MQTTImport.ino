@@ -3,12 +3,15 @@
 //#################################### Plugin 037: MQTT Import ##########################################
 //#######################################################################################################
 
+
 // Original plugin created by Namirda
 
 // This task reads data from the MQTT Import input stream and saves the value
 
 #include "src/Globals/MQTT.h"
+#include "src/Globals/CPlugins.h"
 #include "src/Globals/Plugins.h"
+#include "_Plugin_Helper.h"
 
 #define PLUGIN_037
 #define PLUGIN_ID_037         37
@@ -36,7 +39,7 @@ String getClientName() {
   // Generate the MQTT import client name from the system name and a suffix
   //
   String tmpClientName = F("%sysname%-Import");
-  String ClientName = parseTemplate(tmpClientName, 20);
+  String ClientName = parseTemplate(tmpClientName);
   ClientName.trim(); // Avoid spaced in the name.
   ClientName.replace(' ', '_');
   if (reconnectCount != 0) ClientName += reconnectCount;
@@ -47,7 +50,7 @@ void Plugin_037_try_connect() {
   Plugin_037_update_connect_status();
   if (MQTTclient_037_connected) return;
   // workaround see: https://github.com/esp8266/Arduino/issues/4497#issuecomment-373023864
-  espclient_037 = WiFiClient();
+//  espclient_037 = WiFiClient();
   espclient_037.setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);
 
   if (MQTTclient_037 == NULL) {
@@ -82,7 +85,7 @@ void Plugin_037_update_connect_status() {
     if (!connected) {
       // workaround see: https://github.com/esp8266/Arduino/issues/4497#issuecomment-373023864
       if (MQTTclient_037 != NULL) {
-        espclient_037 = WiFiClient();
+//        espclient_037 = WiFiClient();
         espclient_037.setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);
         MQTTclient_037->setClient(espclient_037);
       }
@@ -152,7 +155,7 @@ boolean Plugin_037(byte function, struct EventStruct *event, String& string)
         {
           String argName = F("p037_template");
           argName += varNr + 1;
-          if (!safe_strncpy(deviceTemplate[varNr], WebServer.arg(argName).c_str(), sizeof(deviceTemplate[varNr]))) {
+          if (!safe_strncpy(deviceTemplate[varNr], web_server.arg(argName).c_str(), sizeof(deviceTemplate[varNr]))) {
             error += getCustomTaskSettingsError(varNr);
           }
         }
@@ -374,23 +377,21 @@ void mqttcallback_037(char* c_topic, byte* b_payload, unsigned int length)
     return;
   }
 
-  // We generate a temp event structure to pass to the plugins
-
-  struct EventStruct TempEvent;
-
-  TempEvent.String1 = topic;                            // This is the topic of the message
-  TempEvent.String2 = payload;                          // This is the payload
-
   //  Here we loop over all tasks and call each 037 plugin with function PLUGIN_IMPORT
 
   for (taskIndex_t y = 0; y < TASKS_MAX; y++)
   {
     if (Settings.TaskDeviceNumber[y] == PLUGIN_ID_037)                // if we have found a 037 device, then give it something to think about!
     {
+      // We generate a temp event structure to pass to the plugins
+      struct EventStruct TempEvent;
+
+      TempEvent.String1 = topic;                            // This is the topic of the message
+      TempEvent.String2 = payload;                          // This is the payload
       TempEvent.TaskIndex = y;
       LoadTaskSettings(TempEvent.TaskIndex);
       TempEvent.BaseVarIndex = y * VARS_PER_TASK;           // This is the index in Uservar where values for this task are stored
-      schedule_plugin_task_event_timer(DeviceIndex, PLUGIN_IMPORT, &TempEvent);
+      Scheduler.schedule_plugin_task_event_timer(DeviceIndex, PLUGIN_IMPORT, &TempEvent);
     }
   }
 }
@@ -406,8 +407,8 @@ boolean MQTTConnect_037()
   if (MQTTclient_037 == NULL) return false;
   String clientid = getClientName();
   // @ToDo TD-er: Plugin allows for more than one MQTT controller, but we're now using only the first enabled one.
-  int enabledMqttController = firstEnabledMQTTController();
-  if (enabledMqttController < 0) {
+  controllerIndex_t enabledMqttController = firstEnabledMQTT_ControllerIndex();
+  if (!validControllerIndex(enabledMqttController)) {
     // No enabled MQTT controller
     return false;
   }
@@ -415,30 +416,45 @@ boolean MQTTConnect_037()
   if (MQTTclient_037->connected()) return true;
 
   // define stuff for the client - this could also be done in the intial declaration of MQTTclient_037
-  if (!WiFiConnected(100)) {
+  if (!NetworkConnected(100)) {
     Plugin_037_update_connect_status();
     return false; // Not connected, so no use in wasting time to connect to a host.
   }
-  MakeControllerSettings(ControllerSettings);
-  LoadControllerSettings(enabledMqttController, ControllerSettings);
-  if (ControllerSettings.UseDNS) {
-    MQTTclient_037->setServer(ControllerSettings.getHost().c_str(), ControllerSettings.Port);
-  } else {
-    MQTTclient_037->setServer(ControllerSettings.getIP(), ControllerSettings.Port);
+  
+  String user, pass;
+  bool hasCredentials = false;
+
+  {
+    MakeControllerSettings(ControllerSettings);
+    if (!AllocatedControllerSettings()) {
+      addLog(LOG_LEVEL_ERROR, F("IMPT : Cannot load controller settings, out of RAM"));
+      return false;
+    }
+
+    LoadControllerSettings(enabledMqttController, ControllerSettings);
+    if (ControllerSettings.UseDNS) {
+      MQTTclient_037->setServer(ControllerSettings.getHost().c_str(), ControllerSettings.Port);
+    } else {
+      MQTTclient_037->setServer(ControllerSettings.getIP(), ControllerSettings.Port);
+    }
+    MQTTclient_037->setCallback(mqttcallback_037);
+    if (hasControllerCredentialsSet(enabledMqttController, ControllerSettings)) {
+      hasCredentials = true;
+      user = getControllerUser(enabledMqttController, ControllerSettings);
+      pass = getControllerPass(enabledMqttController, ControllerSettings);
+    }
   }
-  MQTTclient_037->setCallback(mqttcallback_037);
 
   //  Try three times for a connection
-
   for (byte x = 1; x < 4; x++)
   {
     String log = "";
 
-    if ((SecuritySettings.ControllerUser[enabledMqttController][0] != 0) && (SecuritySettings.ControllerPassword[enabledMqttController][0] != 0))
-      result = MQTTclient_037->connect(clientid.c_str(), SecuritySettings.ControllerUser[enabledMqttController], SecuritySettings.ControllerPassword[enabledMqttController]);
-    else
+    if (hasCredentials) {
+      result = MQTTclient_037->connect(clientid.c_str(), user.c_str(), pass.c_str());
+    } else {
       result = MQTTclient_037->connect(clientid.c_str());
-
+    }
 
     if (result)
     {

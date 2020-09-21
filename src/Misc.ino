@@ -1,17 +1,57 @@
+#include "ESPEasy_common.h"
+
 #include "src/DataStructs/Caches.h"
 #include "src/DataStructs/NodeStruct.h"
 #include "src/DataStructs/PinMode.h"
 #include "src/DataStructs/RTCStruct.h"
+#include "src/DataStructs/StorageLayout.h"
 
 #include "src/Globals/CRCValues.h"
 #include "src/Globals/Cache.h"
 #include "src/Globals/Device.h"
+#include "src/Globals/ESPEasy_Scheduler.h"
+#include "src/Globals/CPlugins.h"
 #include "src/Globals/Plugins.h"
+#include "src/Globals/Plugins_other.h"
 #include "src/Globals/RTC.h"
 #include "src/Globals/ResetFactoryDefaultPref.h"
 #include "src/Globals/Services.h"
+#include "src/Globals/Settings.h"
+
+#include "src/Helpers/Hardware.h"
+#include "src/Helpers/Convert.h"
+
+#include "ESPEasyWifi.h"
 
 
+#ifdef ESP32
+ 
+  //MFD: adding tone support here while waiting for the Arduino Espressif implementation to catch up
+  //As recomandation is not to use external libraries the following code was taken from: https://github.com/lbernstone/Tone Thanks
+  #define TONE_CHANNEL 15
+
+  void noToneESP32(uint8_t pin, uint8_t channel=TONE_CHANNEL)
+  {
+      ledcDetachPin(pin);
+      ledcWrite(channel, 0);
+  }
+
+  void toneESP32(uint8_t pin, unsigned int frequency, unsigned long duration, uint8_t channel=TONE_CHANNEL)
+  {
+      if (ledcRead(channel)) {
+          log_e("Tone channel %d is already in use", ledcRead(channel));
+          return;
+      }
+      ledcAttachPin(pin, channel);
+      ledcWriteTone(channel, frequency);
+      if (duration) {
+          delay(duration);
+          noToneESP32(pin, channel);
+      }    
+  }
+
+
+#endif
 /*********************************************************************************************\
    ESPEasy specific strings
 \*********************************************************************************************/
@@ -30,19 +70,6 @@ String getNodeTypeDisplayString(byte nodeType) {
   return "";
 }
 
-String getSettingsTypeString(SettingsType settingsType) {
-  switch (settingsType) {
-    case BasicSettings_Type:            return F("Settings");
-    case TaskSettings_Type:             return F("TaskSettings");
-    case CustomTaskSettings_Type:       return F("CustomTaskSettings");
-    case ControllerSettings_Type:       return F("ControllerSettings");
-    case CustomControllerSettings_Type: return F("CustomControllerSettings");
-    case NotificationSettings_Type:     return F("NotificationSettings");
-    default:
-      break;
-  }
-  return "";
-}
 
 #ifdef USES_MQTT
 String getMQTT_state() {
@@ -125,14 +152,6 @@ String getResetReasonString() {
   #endif
 }
 
-uint32_t getFlashRealSizeInBytes() {
-  #if defined(ESP32)
-    return ESP.getFlashChipSize();
-  #else
-    return ESP.getFlashChipRealSize(); //ESP.getFlashChipSize();
-  #endif
-}
-
 String getSystemBuildString() {
   String result;
   result += BUILD;
@@ -160,6 +179,7 @@ String getPluginDescriptionString() {
   #ifdef USE_NON_STANDARD_24_TASKS
   result += F(" 24tasks");
   #endif
+  result.trim();
   return result;
 }
 
@@ -235,31 +255,6 @@ bool flashChipVendorPuya() {
 /*********************************************************************************************\
  Memory management
 \*********************************************************************************************/
-
-// clean up tcp connections that are in TIME_WAIT status, to conserve memory
-// In future versions of WiFiClient it should be possible to call abort(), but
-// this feature is not in all upstream versions yet.
-// See https://github.com/esp8266/Arduino/issues/1923
-// and https://github.com/letscontrolit/ESPEasy/issues/253
-#if defined(ESP8266)
-  #include <md5.h>
-#endif
-#if defined(ESP8266)
-
-struct tcp_pcb;
-extern struct tcp_pcb* tcp_tw_pcbs;
-extern "C" void tcp_abort (struct tcp_pcb* pcb);
-
-void tcpCleanup()
-{
-
-     while(tcp_tw_pcbs!=NULL)
-    {
-      tcp_abort(tcp_tw_pcbs);
-    }
-
- }
-#endif
 
 
 // For keeping track of 'cont' stack
@@ -341,127 +336,9 @@ bool allocatedOnStack(const void* address) {
 #endif // ESP32
 
 
-/**********************************************************
-*                                                         *
-* Deep Sleep related functions                            *
-*                                                         *
-**********************************************************/
-int getDeepSleepMax()
-{
-  int dsmax = 4294; // About 71 minutes, limited by hardware
 
-#if defined(CORE_POST_2_5_0)
-  dsmax = INT_MAX;
 
-  if ((ESP.deepSleepMax() / 1000000ULL) <= (uint64_t)INT_MAX) {
-    dsmax = (int)(ESP.deepSleepMax() / 1000000ULL);
-  }
-#endif // if defined(CORE_POST_2_5_0)
-  return dsmax;
-}
 
-bool isDeepSleepEnabled()
-{
-  if (!Settings.deepSleep_wakeTime) {
-    return false;
-  }
-
-  // cancel deep sleep loop by pulling the pin GPIO16(D0) to GND
-  // recommended wiring: 3-pin-header with 1=RST, 2=D0, 3=GND
-  //                    short 1-2 for normal deep sleep / wakeup loop
-  //                    short 2-3 to cancel sleep loop for modifying settings
-  pinMode(16, INPUT_PULLUP);
-
-  if (!digitalRead(16))
-  {
-    return false;
-  }
-  return true;
-}
-
-bool readyForSleep()
-{
-  if (!isDeepSleepEnabled()) {
-    return false;
-  }
-
-  if (!WiFiConnected()) {
-    // Allow 12 seconds to establish connections
-    return timeOutReached(timerAwakeFromDeepSleep + 12000);
-  }
-  return timeOutReached(timerAwakeFromDeepSleep + 1000 * Settings.deepSleep_wakeTime);
-}
-
-void prepare_deepSleep(int dsdelay)
-{
-  checkRAM(F("prepare_deepSleep"));
-
-  if (!isDeepSleepEnabled())
-  {
-    // Deep sleep canceled by GPIO16(D0)=LOW
-    return;
-  }
-
-  // first time deep sleep? offer a way to escape
-  if (lastBootCause != BOOT_CAUSE_DEEP_SLEEP)
-  {
-    addLog(LOG_LEVEL_INFO, F("SLEEP: Entering deep sleep in 30 seconds."));
-
-    if (Settings.UseRules && isDeepSleepEnabled())
-    {
-      eventQueue.add(F("System#NoSleep=30"));
-      while (processNextEvent()) {
-        delay(1);
-      }
-    }
-    delayBackground(30000);
-
-    // disabled?
-    if (!isDeepSleepEnabled())
-    {
-      addLog(LOG_LEVEL_INFO, F("SLEEP: Deep sleep cancelled (GPIO16 connected to GND)"));
-      return;
-    }
-  }
-  deepSleepStart(dsdelay); // Call deepSleepStart function after these checks
-}
-
-void deepSleepStart(int dsdelay)
-{
-  // separate function that is called from above function or directly from rules, usign deepSleep_wakeTime as a one-shot
-  if (Settings.UseRules)
-  {
-    eventQueue.add(F("System#Sleep"));
-    while (processNextEvent()) {
-      delay(1);
-    }
-  }
-
-  addLog(LOG_LEVEL_INFO, F("SLEEP: Powering down to deepsleep..."));
-  RTC.deepSleepState = 1;
-  prepareShutdown();
-
-  #if defined(ESP8266)
-    # if defined(CORE_POST_2_5_0)
-  uint64_t deepSleep_usec = dsdelay * 1000000ULL;
-
-  if ((deepSleep_usec > ESP.deepSleepMax()) || (dsdelay < 0)) {
-    deepSleep_usec = ESP.deepSleepMax();
-  }
-  ESP.deepSleepInstant(deepSleep_usec, WAKE_RF_DEFAULT);
-    # else // if defined(CORE_POST_2_5_0)
-
-  if ((dsdelay > 4294) || (dsdelay < 0)) {
-    dsdelay = 4294; // max sleep time ~71 minutes
-  }
-  ESP.deepSleep((uint32_t)dsdelay * 1000000, WAKE_RF_DEFAULT);
-    # endif // if defined(CORE_POST_2_5_0)
-  #endif // if defined(ESP8266)
-  #if defined(ESP32)
-  esp_sleep_enable_timer_wakeup((uint32_t)dsdelay * 1000000);
-  esp_deep_sleep_start();
-  #endif // if defined(ESP32)
-}
 
 bool remoteConfig(struct EventStruct *event, const String& string)
 {
@@ -589,6 +466,29 @@ String formatGpioName_RX_HW(bool optional) {
   return formatGpioName("TX (HW)", gpio_input, optional);
 }
 
+#ifdef ESP32
+
+String formatGpioName_ADC(int gpio_pin) {
+  int adc,ch, t;
+  if (getADC_gpio_info(gpio_pin, adc, ch, t)) {
+    if (adc == 0) {
+      return F("Hall Effect");
+    }
+    String res = F("ADC# ch?");
+    res.replace("#", String(adc));
+    res.replace("?", String(ch));
+    if (t >= 0) {
+      res += F(" (T");
+      res += t;
+      res += ')';
+    }
+    return res;
+  }
+  return "";
+}
+
+#endif
+
 /*********************************************************************************************\
    set pin mode & state (info table)
   \*********************************************************************************************/
@@ -702,6 +602,7 @@ String getPinModeString(byte mode) {
     case PIN_MODE_UNDEFINED:    return F("undefined");
     case PIN_MODE_INPUT:        return F("input");
     case PIN_MODE_INPUT_PULLUP: return F("input pullup");
+    case PIN_MODE_INPUT_PULLDOWN: return F("input pulldown");
     case PIN_MODE_OFFLINE:      return F("offline");
     case PIN_MODE_OUTPUT:       return F("output");
     case PIN_MODE_PWM:          return F("PWM");
@@ -712,16 +613,44 @@ String getPinModeString(byte mode) {
   return F("ERROR: Not Defined");
 }
 
+#if defined(ESP32)
+void analogWriteESP32(int pin, int value)
+{
+  // find existing channel if this pin has been used before
+  int8_t ledChannel = -1;
+
+  for (byte x = 0; x < 16; x++) {
+    if (ledChannelPin[x] == pin) {
+      ledChannel = x;
+    }
+  }
+
+  if (ledChannel == -1)             // no channel set for this pin
+  {
+    for (byte x = 0; x < 16; x++) { // find free channel
+      if (ledChannelPin[x] == -1)
+      {
+        int freq = 5000;
+        ledChannelPin[x] = pin; // store pin nr
+        ledcSetup(x, freq, 10); // setup channel
+        ledcAttachPin(pin, x);  // attach to this pin
+        ledChannel = x;
+        break;
+      }
+    }
+  }
+  ledcWrite(ledChannel, value);
+}
+#endif // if defined(ESP32)
+
 
 /********************************************************************************************\
   Status LED
 \*********************************************************************************************/
-#if defined(ESP32)
-  #define PWMRANGE 1024
-#endif
-#define STATUS_PWM_NORMALVALUE (PWMRANGE>>2)
-#define STATUS_PWM_NORMALFADE (PWMRANGE>>8)
-#define STATUS_PWM_TRAFFICRISE (PWMRANGE>>1)
+#define PWMRANGE_FULL 1023
+#define STATUS_PWM_NORMALVALUE (PWMRANGE_FULL>>2)
+#define STATUS_PWM_NORMALFADE (PWMRANGE_FULL>>8)
+#define STATUS_PWM_TRAFFICRISE (PWMRANGE_FULL>>1)
 
 void statusLED(bool traffic)
 {
@@ -743,7 +672,7 @@ void statusLED(bool traffic)
   else
   {
 
-    if (WiFiConnected())
+    if (NetworkConnected())
     {
       long int delta = timePassedSince(gnLastUpdate);
       if (delta>0 || delta<0 )
@@ -756,16 +685,16 @@ void statusLED(bool traffic)
     //AP mode is active
     else if (WifiIsAP(WiFi.getMode()))
     {
-      nStatusValue = ((millis()>>1) & PWMRANGE) - (PWMRANGE>>2); //ramp up for 2 sec, 3/4 luminosity
+      nStatusValue = ((millis()>>1) & PWMRANGE_FULL) - (PWMRANGE_FULL>>2); //ramp up for 2 sec, 3/4 luminosity
     }
     //Disconnected
     else
     {
-      nStatusValue = (millis()>>1) & (PWMRANGE>>2); //ramp up for 1/2 sec, 1/4 luminosity
+      nStatusValue = (millis()>>1) & (PWMRANGE_FULL>>2); //ramp up for 1/2 sec, 1/4 luminosity
     }
   }
 
-  nStatusValue = constrain(nStatusValue, 0, PWMRANGE);
+  nStatusValue = constrain(nStatusValue, 0, PWMRANGE_FULL);
 
   if (gnStatusValueCurrent != nStatusValue)
   {
@@ -774,11 +703,14 @@ void statusLED(bool traffic)
     long pwm = nStatusValue * nStatusValue; //simple gamma correction
     pwm >>= 10;
     if (Settings.Pin_status_led_Inversed)
-      pwm = PWMRANGE-pwm;
+      pwm = PWMRANGE_FULL-pwm;
 
     #if defined(ESP8266)
       analogWrite(Settings.Pin_status_led, pwm);
-    #endif
+    #endif // if defined(ESP8266)
+    #if defined(ESP32)
+       analogWriteESP32(Settings.Pin_status_led, pwm);
+    #endif // if defined(ESP32)
   }
 }
 
@@ -838,6 +770,42 @@ void parseCommandString(struct EventStruct *event, const String& string)
   event->Par5 = parseCommandArgumentInt(string, 5);
 }
 
+
+
+/********************************************************************************************\
+  Toggle controller enabled state
+  \*********************************************************************************************/
+bool setControllerEnableStatus(controllerIndex_t controllerIndex, bool enabled)
+{
+  if (!validControllerIndex(controllerIndex)) return false;
+  checkRAM(F("setControllerEnableStatus"));
+  // Only enable controller if it has a protocol configured
+  if (Settings.Protocol[controllerIndex] != 0 || !enabled) {
+    Settings.ControllerEnabled[controllerIndex] = enabled;
+    return true;
+  }
+  return false;
+}
+
+/********************************************************************************************\
+  Toggle task enabled state
+  \*********************************************************************************************/
+bool setTaskEnableStatus(taskIndex_t taskIndex, bool enabled)
+{
+  if (!validTaskIndex(taskIndex)) return false;
+  checkRAM(F("setTaskEnableStatus"));
+  // Only enable task if it has a Plugin configured
+  if (validPluginID(Settings.TaskDeviceNumber[taskIndex]) || !enabled) {
+    Settings.TaskDeviceEnabled[taskIndex] = enabled;
+    if (enabled) {
+      Scheduler.schedule_task_device_timer(taskIndex, millis() + 10);
+    }
+    return true;
+  }
+  return false;
+}
+
+
 /********************************************************************************************\
   Clear task settings for given task
   \*********************************************************************************************/
@@ -854,125 +822,6 @@ void taskClear(taskIndex_t taskIndex, bool save)
   }
 }
 
-String checkTaskSettings(taskIndex_t taskIndex) {
-  String err = LoadTaskSettings(taskIndex);
-  if (err.length() > 0) return err;
-  if (!ExtraTaskSettings.checkUniqueValueNames()) {
-    return F("Use unique value names");
-  }
-  if (!ExtraTaskSettings.checkInvalidCharInNames()) {
-    return F("Invalid character in names. Do not use ',#[]' or space.");
-  }
-  String deviceName = ExtraTaskSettings.TaskDeviceName;
-  if (deviceName.length() == 0) {
-    if (Settings.TaskDeviceEnabled[taskIndex]) {
-      // Decide what to do here, for now give a warning when task is enabled.
-      return F("Warning: Task Device Name is empty. It is adviced to give tasks an unique name");
-    }
-  }
-  // Do not use the cached function findTaskIndexByName since that one does rely on the fact names should be unique.
-  for (taskIndex_t i = 0; i < TASKS_MAX; ++i) {
-    if (i != taskIndex && Settings.TaskDeviceEnabled[i]) {
-      LoadTaskSettings(i);
-      if (ExtraTaskSettings.TaskDeviceName[0] != 0) {
-        if (strcasecmp(ExtraTaskSettings.TaskDeviceName, deviceName.c_str()) == 0) {
-          err = F("Task Device Name is not unique, conflicts with task ID #");
-          err += (i+1);
-//          return err;
-        }
-      }
-    }
-  }
-
-  err += LoadTaskSettings(taskIndex);
-  return err;
-}
-
-
-/********************************************************************************************\
-  Find positional parameter in a char string
-  \*********************************************************************************************/
-
-bool HasArgv(const char *string, unsigned int argc) {
-  String argvString;
-  return GetArgv(string, argvString, argc);
-}
-
-bool GetArgv(const char *string, String& argvString, unsigned int argc) {
-  int pos_begin, pos_end;
-  bool hasArgument = GetArgvBeginEnd(string, argc, pos_begin, pos_end);
-  argvString = "";
-  if (!hasArgument) return false;
-  if (pos_begin >= 0 && pos_end >= 0 && pos_end > pos_begin) {
-    argvString.reserve(pos_end - pos_begin);
-    for (int i = pos_begin; i < pos_end; ++i) {
-      argvString += string[i];
-    }
-  }
-  argvString.trim();
-  argvString = stripQuotes(argvString);
-  return argvString.length() > 0;
-}
-
-bool GetArgvBeginEnd(const char *string, const unsigned int argc, int& pos_begin, int& pos_end) {
-  pos_begin = -1;
-  pos_end   = -1;
-  size_t string_len = strlen(string);
-  unsigned int string_pos = 0, argc_pos = 0;
-  bool parenthesis          = false;
-  char matching_parenthesis = '"';
-
-  while (string_pos < string_len)
-  {
-    char c, d; // c = current char, d = next char (if available)
-    c = string[string_pos];
-    d = 0;
-
-    if ((string_pos + 1) < string_len) {
-      d = string[string_pos + 1];
-    }
-
-    if       (!parenthesis && (c == ' ') && (d == ' ')) {}
-    else if  (!parenthesis && (c == ' ') && (d == ',')) {}
-    else if  (!parenthesis && (c == ',') && (d == ' ')) {}
-    else if  (!parenthesis && (c == ' ') && (d >= 33) && (d <= 126)) {}
-    else if  (!parenthesis && (c == ',') && (d >= 33) && (d <= 126)) {}
-    else
-    {
-      if (!parenthesis && (isQuoteChar(c) || (c == '['))) {
-        parenthesis          = true;
-        matching_parenthesis = c;
-
-        if (c == '[') {
-          matching_parenthesis = ']';
-        }
-      } else if (parenthesis && (c == matching_parenthesis)) {
-        parenthesis = false;
-      }
-
-      if (pos_begin == -1) {
-        pos_begin = string_pos;
-        pos_end   = string_pos;
-      }
-      ++pos_end;
-
-      if (!parenthesis && (isParameterSeparatorChar(d) || (d == 0))) // end of word
-      {
-        argc_pos++;
-
-        if (argc_pos == argc)
-        {
-          return true;
-        }
-        pos_begin = -1;
-        pos_end   = -1;
-        string_pos++;
-      }
-    }
-    string_pos++;
-  }
-  return false;
-}
 
 
 
@@ -1004,6 +853,7 @@ void dump (uint32_t addr) { //Seems already included in core 2.4 ...
 }
 #endif
 
+/*
 uint32_t progMemMD5check(){
     checkRAM(F("progMemMD5check"));
     #define BufSize 10
@@ -1037,6 +887,7 @@ uint32_t progMemMD5check(){
    addLog(LOG_LEVEL_INFO, F("CRC  : program checksum       ...FAIL"));
    return 0;
 }
+*/
 
 /********************************************************************************************\
   Handler for keeping ExtraTaskSettings up to date using cache
@@ -1081,14 +932,14 @@ void ResetFactory()
   RTC.factoryResetCounter++;
   saveToRTC();
 
-  //always format on factory reset, in case of corrupt SPIFFS
-  SPIFFS.end();
+  //always format on factory reset, in case of corrupt FS
+  ESPEASY_FS.end();
   serialPrintln(F("RESET: formatting..."));
-  SPIFFS.format();
+  ESPEASY_FS.format();
   serialPrintln(F("RESET: formatting done..."));
-  if (!SPIFFS.begin())
+  if (!ESPEASY_FS.begin())
   {
-    serialPrintln(F("RESET: FORMAT SPIFFS FAILED!"));
+    serialPrintln(F("RESET: FORMAT FS FAILED!"));
     return;
   }
 
@@ -1102,9 +953,10 @@ void ResetFactory()
   fname=FILE_SECURITY;
   InitFile(fname.c_str(), 4096);
 
+  #ifdef USES_NOTIFIER
   fname=FILE_NOTIFICATION;
   InitFile(fname.c_str(), 4096);
-
+  #endif
   fname=FILE_RULES;
   InitFile(fname.c_str(), 0);
 
@@ -1159,7 +1011,7 @@ void ResetFactory()
     SecuritySettings.WifiSSID2[0] = 0;
     SecuritySettings.WifiKey2[0] = 0;
   }
-  SecuritySettings.Password[0] = 0;
+  strcpy_P(SecuritySettings.Password, PSTR(DEFAULT_ADMIN_PASS));
 
   Settings.ResetFactoryDefaultPreference = ResetFactoryDefaultPreference.getPreference();
 
@@ -1176,11 +1028,11 @@ void ResetFactory()
   Settings.Pin_status_led  = gpio_settings.status_led;
   Settings.Pin_status_led_Inversed  = DEFAULT_PIN_STATUS_LED_INVERSED;
   Settings.Pin_sd_cs       = -1;
-  Settings.Pin_Reset       = -1;
+  Settings.Pin_Reset       = DEFAULT_PIN_RESET_BUTTON;
   Settings.Protocol[0]     = DEFAULT_PROTOCOL;
   Settings.deepSleep_wakeTime       = false;
   Settings.CustomCSS       = false;
-  Settings.InitSPI         = false;
+  Settings.InitSPI         = DEFAULT_SPI;
   for (taskIndex_t x = 0; x < TASKS_MAX; x++)
   {
     Settings.TaskDevicePin1[x] = -1;
@@ -1188,7 +1040,7 @@ void ResetFactory()
     Settings.TaskDevicePin3[x] = -1;
     Settings.TaskDevicePin1PullUp[x] = true;
     Settings.TaskDevicePin1Inversed[x] = false;
-    for (byte y = 0; y < CONTROLLER_MAX; y++)
+    for (controllerIndex_t y = 0; y < CONTROLLER_MAX; y++)
       Settings.TaskDeviceSendData[y][x] = true;
     Settings.TaskDeviceTimer[x] = Settings.Delay;
   }
@@ -1196,13 +1048,28 @@ void ResetFactory()
   // advanced Settings
   Settings.UseRules 		= DEFAULT_USE_RULES;
   Settings.ControllerEnabled[0] = DEFAULT_CONTROLLER_ENABLED;
-  Settings.MQTTRetainFlag	= DEFAULT_MQTT_RETAIN;
-  Settings.MessageDelay	= DEFAULT_MQTT_DELAY;
-  Settings.MQTTUseUnitNameAsClientId = DEFAULT_MQTT_USE_UNITNAME_AS_CLIENTID;
+  Settings.MQTTRetainFlag_unused	= DEFAULT_MQTT_RETAIN;
+  Settings.MessageDelay_unused	= DEFAULT_MQTT_DELAY;
+  Settings.MQTTUseUnitNameAsClientId_unused = DEFAULT_MQTT_USE_UNITNAME_AS_CLIENTID;
 
+  // allow to set default latitude and longitude
+  #ifdef DEFAULT_LATITUDE
+    Settings.Latitude   = DEFAULT_LATITUDE;
+  #endif
+  #ifdef DEFAULT_LONGITUDE
+    Settings.Longitude  = DEFAULT_LONGITUDE;
+  #endif
 
   Settings.UseSerial		= DEFAULT_USE_SERIAL;
   Settings.BaudRate		= DEFAULT_SERIAL_BAUD;
+
+  Settings.ETH_Phy_Addr            = gpio_settings.eth_phyaddr;
+  Settings.ETH_Pin_mdc             = gpio_settings.eth_mdc;
+  Settings.ETH_Pin_mdio            = gpio_settings.eth_mdio;
+  Settings.ETH_Pin_power           = gpio_settings.eth_power;
+  Settings.ETH_Phy_Type            = gpio_settings.eth_phytype;
+  Settings.ETH_Clock_Mode          = gpio_settings.eth_clock_mode;
+  Settings.NetworkMedium           = gpio_settings.active_network_medium;
 
 /*
 	Settings.GlobalSync						= DEFAULT_USE_GLOBAL_SYNC;
@@ -1213,6 +1080,7 @@ void ResetFactory()
 	Settings.ConnectionFailuresThreshold	= DEFAULT_CON_FAIL_THRES;
 	Settings.WireClockStretchLimit			= DEFAULT_I2C_CLOCK_LIMIT;
 */
+  Settings.I2C_clockSpeed     = DEFAULT_I2C_CLOCK_SPEED;
 
 #ifdef PLUGIN_DESCR
   strcpy_P(Settings.Name, PSTR(PLUGIN_DESCR));
@@ -1221,21 +1089,31 @@ void ResetFactory()
   addPredefinedPlugins(gpio_settings);
   addPredefinedRules(gpio_settings);
 
+#if DEFAULT_CONTROLLER
+  {
+    // Place in a scope to have its memory freed ASAP
+    MakeControllerSettings(ControllerSettings);
+    if (AllocatedControllerSettings()) {
+      safe_strncpy(ControllerSettings.Subscribe, F(DEFAULT_SUB), sizeof(ControllerSettings.Subscribe));
+      safe_strncpy(ControllerSettings.Publish, F(DEFAULT_PUB), sizeof(ControllerSettings.Publish));
+      safe_strncpy(ControllerSettings.MQTTLwtTopic, F(DEFAULT_MQTT_LWT_TOPIC), sizeof(ControllerSettings.MQTTLwtTopic));
+      safe_strncpy(ControllerSettings.LWTMessageConnect, F(DEFAULT_MQTT_LWT_CONNECT_MESSAGE), sizeof(ControllerSettings.LWTMessageConnect));
+      safe_strncpy(ControllerSettings.LWTMessageDisconnect, F(DEFAULT_MQTT_LWT_DISCONNECT_MESSAGE), sizeof(ControllerSettings.LWTMessageDisconnect));
+      str2ip((char*)DEFAULT_SERVER, ControllerSettings.IP);
+      ControllerSettings.setHostname(F(DEFAULT_SERVER_HOST));
+      ControllerSettings.UseDNS = DEFAULT_SERVER_USEDNS;
+      ControllerSettings.useExtendedCredentials(DEFAULT_USE_EXTD_CONTROLLER_CREDENTIALS);
+      ControllerSettings.Port = DEFAULT_PORT;
+      setControllerUser(0, ControllerSettings, F(DEFAULT_CONTROLLER_USER));
+      setControllerPass(0, ControllerSettings, F(DEFAULT_CONTROLLER_PASS));
+
+      SaveControllerSettings(0, ControllerSettings);
+    }
+  }
+#endif
+
   SaveSettings();
 
-#if DEFAULT_CONTROLLER
-  MakeControllerSettings(ControllerSettings);
-  safe_strncpy(ControllerSettings.Subscribe, F(DEFAULT_SUB), sizeof(ControllerSettings.Subscribe));
-  safe_strncpy(ControllerSettings.Publish, F(DEFAULT_PUB), sizeof(ControllerSettings.Publish));
-  safe_strncpy(ControllerSettings.MQTTLwtTopic, F(DEFAULT_MQTT_LWT_TOPIC), sizeof(ControllerSettings.MQTTLwtTopic));
-  safe_strncpy(ControllerSettings.LWTMessageConnect, F(DEFAULT_MQTT_LWT_CONNECT_MESSAGE), sizeof(ControllerSettings.LWTMessageConnect));
-  safe_strncpy(ControllerSettings.LWTMessageDisconnect, F(DEFAULT_MQTT_LWT_DISCONNECT_MESSAGE), sizeof(ControllerSettings.LWTMessageDisconnect));
-  str2ip((char*)DEFAULT_SERVER, ControllerSettings.IP);
-  ControllerSettings.setHostname(F(DEFAULT_SERVER_HOST));
-  ControllerSettings.UseDNS = DEFAULT_SERVER_USEDNS;
-  ControllerSettings.Port = DEFAULT_PORT;
-  SaveControllerSettings(0, ControllerSettings);
-#endif
   checkRAM(F("ResetFactory2"));
   serialPrintln(F("RESET: Succesful, rebooting. (you might need to press the reset button if you've justed flashed the firmware)"));
   //NOTE: this is a known ESP8266 bug, not our fault. :)
@@ -1297,127 +1175,6 @@ unsigned long getMaxFreeBlock()
 
 
 
-/********************************************************************************************\
-  Check if string is valid float
-  \*********************************************************************************************/
-bool isFloat(const String& tBuf) {
-  return isNumerical(tBuf, false);
-}
-
-bool isValidFloat(float f) {
-  if (f == NAN)      return false; //("NaN");
-  if (f == INFINITY) return false; //("INFINITY");
-  if (-f == INFINITY)return false; //("-INFINITY");
-  if (isnan(f))      return false; //("isnan");
-  if (isinf(f))      return false; //("isinf");
-  return true;
-}
-
-bool isInt(const String& tBuf) {
-  return isNumerical(tBuf, true);
-}
-
-bool validIntFromString(const String& tBuf, int& result) {
-  const String numerical = getNumerical(tBuf, true);
-  const bool isvalid = numerical.length() > 0;
-  if (isvalid) {
-    result = numerical.toInt();
-  }
-  return isvalid;
-}
-
-bool validUIntFromString(const String& tBuf, unsigned int& result) {
-  int tmp;
-  if (!validIntFromString(tBuf, tmp)) return false;
-  if (tmp < 0) return false;
-  result = static_cast<unsigned int>(tmp);
-  return true;
-}
-
-
-bool validFloatFromString(const String& tBuf, float& result) {
-  // DO not call validDoubleFromString and then cast to float.
-  // Working with double values is quite CPU intensive as it must be done in software 
-  // since the ESP does not have large enough registers for handling double values in hardware.
-  const String numerical = getNumerical(tBuf, false);
-  const bool isvalid = numerical.length() > 0;
-  if (isvalid) {
-    result = numerical.toFloat();
-  }
-  return isvalid;
-}
-
-bool validDoubleFromString(const String& tBuf, double& result) {
-  #ifdef CORE_POST_2_5_0
-  // String.toDouble() is introduced in core 2.5.0
-  const String numerical = getNumerical(tBuf, false);
-  const bool isvalid = numerical.length() > 0;
-  if (isvalid) {
-    result = numerical.toDouble();
-  }
-  return isvalid;
-  #else
-  float tmp = static_cast<float>(result);
-  bool res = validFloatFromString(tBuf, tmp);
-  result = static_cast<double>(tmp);
-  return res;
-  #endif
-}
-
-
-String getNumerical(const String& tBuf, bool mustBeInteger) {
-  String result = "";
-  const unsigned int bufLength = tBuf.length();
-  unsigned int firstDec = 0;
-  while (firstDec < bufLength && tBuf.charAt(firstDec) == ' ') {
-    ++firstDec;
-  }
-  if (firstDec >= bufLength) return result;
-
-  bool decPt = false;
-  
-  char c = tBuf.charAt(firstDec);
-  if(c == '+' || c == '-') {
-    result += c;
-    ++firstDec;
-  }
-  for(unsigned int x=firstDec; x < bufLength; ++x) {
-    c = tBuf.charAt(x);
-    if(c == '.') {
-      if (mustBeInteger) return result;
-      // Only one decimal point allowed
-      if(decPt) return result;
-      else decPt = true;
-    }
-    else if(c < '0' || c > '9') return result;
-    result += c;
-  }
-  return result;
-}
-
-bool isNumerical(const String& tBuf, bool mustBeInteger) {
-  const unsigned int bufLength = tBuf.length();
-  unsigned int firstDec = 0;
-  while (firstDec < bufLength && tBuf.charAt(firstDec) == ' ') {
-    ++firstDec;
-  }
-  if (firstDec >= bufLength) return false;
-  bool decPt = false;
-  char c = tBuf.charAt(firstDec);
-  if(c == '+' || c == '-')
-    ++firstDec;
-  for(unsigned int x=firstDec; x < bufLength; ++x) {
-    c = tBuf.charAt(x);
-    if(c == '.') {
-      if (mustBeInteger) return false;
-      // Only one decimal point allowed
-      if(decPt) return false;
-      else decPt = true;
-    }
-    else if(c < '0' || c > '9') return false;
-  }
-  return true;
-}
 
 void logtimeStringToSeconds(const String& tBuf, int hours, int minutes, int seconds)
 {
@@ -1491,21 +1248,6 @@ bool timeStringToSeconds(const String& tBuf, int& time_seconds) {
   return true;
 }
 
-/********************************************************************************************\
-   Clean up all before going to sleep or reboot.
- \*********************************************************************************************/
-void prepareShutdown()
-{
-#ifdef USES_MQTT
-  runPeriodicalMQTT(); // Flush outstanding MQTT messages
-#endif // USES_MQTT
-  process_serialWriteBuffer();
-  flushAndDisconnectAllClients();
-  saveUserVarToRTC();
-  saveToRTC();
-  SPIFFS.end();
-  delay(100); // give the node time to flush all before reboot or sleep
-}
 
 /********************************************************************************************\
    Delayed reboot, in case of issues, do not reboot with high frequency as it might not help...
@@ -1535,17 +1277,35 @@ void reboot() {
 /********************************************************************************************\
    Parse string template
  \*********************************************************************************************/
-String parseTemplate(String& tmpString, byte lineSize)
+String parseTemplate(String& tmpString)
 {
-  checkRAM(F("parseTemplate"));
+  return parseTemplate(tmpString, false);
+}
+
+String parseTemplate(String& tmpString, bool useURLencode)
+{
+  return parseTemplate_padded(tmpString, 0, useURLencode);
+}
+
+String parseTemplate_padded(String& tmpString, byte minimal_lineSize)
+{
+  return parseTemplate_padded(tmpString, minimal_lineSize, false);
+}
+
+String parseTemplate_padded(String& tmpString, byte minimal_lineSize, bool useURLencode)
+{
+  checkRAM(F("parseTemplate_padded"));
   START_TIMER
 
   // Keep current loaded taskSettings to restore at the end.
   byte   currentTaskIndex = ExtraTaskSettings.TaskIndex;
   String newString;
-  newString.reserve(lineSize); // Our best guess of the new size.
+  newString.reserve(minimal_lineSize); // Our best guess of the new size.
 
-  parseSystemVariables(tmpString, false);
+
+  if (parseTemplate_CallBack_ptr != nullptr)
+     parseTemplate_CallBack_ptr(tmpString, useURLencode);
+  parseSystemVariables(tmpString, useURLencode);
   
 
   int startpos = 0;
@@ -1595,7 +1355,7 @@ String parseTemplate(String& tmpString, byte lineSize)
           }
           String value = String(customFloatVar[varNum - 1], nr_decimals);
           value.trim();
-          transformValue(newString, lineSize, value, format, tmpString);
+          transformValue(newString, minimal_lineSize, value, format, tmpString);
         }
       }
     }
@@ -1617,7 +1377,7 @@ String parseTemplate(String& tmpString, byte lineSize)
           String value = formatUserVar(taskIndex, valueNr, isvalid);
 
           if (isvalid) {
-            transformValue(newString, lineSize, value, format, tmpString);
+            transformValue(newString, minimal_lineSize, value, format, tmpString);
           }
         } else {
           // try if this is a get config request
@@ -1627,7 +1387,7 @@ String parseTemplate(String& tmpString, byte lineSize)
 
           if (PluginCall(PLUGIN_GET_CONFIG, &TempEvent, tmpName))
           {
-            transformValue(newString, lineSize, tmpName, format, tmpString);
+            transformValue(newString, minimal_lineSize, tmpName, format, tmpString);
           }                  
         }
       }
@@ -1642,9 +1402,10 @@ String parseTemplate(String& tmpString, byte lineSize)
     // This may have taken some time, so call delay()
     delay(0);
   }
-
+  
   // Copy the rest of the string (or all if no replacements were done)
   newString += tmpString.substring(lastStartpos);
+
   checkRAM(F("parseTemplate2"));
 
   // Restore previous loaded taskSettings
@@ -1653,14 +1414,17 @@ String parseTemplate(String& tmpString, byte lineSize)
     LoadTaskSettings(currentTaskIndex);
   }
 
-  // parseSystemVariables(newString, false);
-  parseStandardConversions(newString, false);
+  parseStandardConversions(newString, useURLencode);
+
+  // process other markups as well
+  parse_string_commands(newString); 
 
   // padding spaces
-  while (newString.length() < lineSize) {
+  while (newString.length() < minimal_lineSize) {
     newString += ' ';
   }
-  STOP_TIMER(PARSE_TEMPLATE);
+
+  STOP_TIMER(PARSE_TEMPLATE_PADDED);
   checkRAM(F("parseTemplate3"));
   return newString;
 }
@@ -1738,6 +1502,13 @@ bool findNextValMarkInString(const String& input, int& startpos, int& hashpos, i
   int tmpHashpos = input.indexOf('#', tmpStartpos);
 
   if (tmpHashpos == -1) { return false; }
+  // We found a hash position, check if there is another '[' inbetween.
+  for (int i = tmpStartpos; i < tmpHashpos; ++i) {
+    if (input[i] == '[') {
+      tmpStartpos = i;
+    }
+  }
+
   int tmpEndpos = input.indexOf(']', tmpStartpos);
 
   if (tmpEndpos == -1) { return false; }
@@ -1810,7 +1581,7 @@ void transformValue(
     if (valueFormat.length() > 0) //do the checks only if a Format is defined to optimize loop
     {
       int logicVal = 0;
-      float valFloat = 0.0;
+      float valFloat = 0.0f;
       if (validFloatFromString(value, valFloat))
       {
         //to be used for binary values (0 or 1)
@@ -1845,11 +1616,31 @@ void transformValue(
           {
           case 'V': //value = value without transformations
             break;
+          case 'p': // Password hide using asterisks or custom character: pc
+            {
+              char maskChar = '*';
+              if (tempValueFormatLength > 1)
+              {
+                maskChar = tempValueFormat[1];
+              }
+              if (value == F("0")) {
+                value = "";
+              } else {
+                const int valueLength = value.length();
+                for (int i = 0; i < valueLength; i++) {
+                  value[i] = maskChar;
+                }
+              }
+            }
+            break;
           case 'O':
             value = logicVal == 0 ? F("OFF") : F(" ON"); //(equivalent to XOR operator)
             break;
           case 'C':
             value = logicVal == 0 ? F("CLOSE") : F(" OPEN");
+            break;
+          case 'c':
+            value = logicVal == 0 ? F("CLOSED") : F("  OPEN");
             break;
           case 'M':
             value = logicVal == 0 ? F("AUTO") : F(" MAN");
@@ -1878,10 +1669,17 @@ void transformValue(
           case 'I':
             value = logicVal == 0 ? F("OUT") : F(" IN");
             break;
+          case 'L':
+            value = logicVal == 0 ? F(" LEFT") : F("RIGHT");
+            break;
+          case 'l':
+            value = logicVal == 0 ? F("L") : F("R");
+            break;
           case 'Z' :// return "0" or "1"
             value = logicVal == 0 ? "0" : "1";
             break;
           case 'D' ://Dx.y min 'x' digits zero filled & 'y' decimal fixed digits
+          case 'd' ://like above but with spaces padding
             {
               int x;
               int y;
@@ -1919,7 +1717,7 @@ void transformValue(
                 indexDot = value.length();
               }              
               for (byte f = 0; f < (x - indexDot); f++) {
-                value = "0" + value;
+                value = (tempValueFormat[0]=='d'? ' ' : '0') + value;
               }
               break;
             }
@@ -1993,6 +1791,23 @@ void transformValue(
                   newString += F("ERR");
                 }
               }
+              break;
+            case 'C': // Capitalize First Word-Character value (space/period are checked)
+              if (value.length() > 0) {
+                value.toLowerCase();
+                bool nextCapital = true;
+                for (uint8_t i = 0; i < value.length();i++) {
+                  if (nextCapital)
+                    value[i] = toupper(value[i]);
+                  nextCapital = (value[i] == ' ' || value[i] == '.'); // Very simple, capitalize-first-after-space/period
+                }
+              }
+              break;
+            case 'u': // Uppercase
+              value.toUpperCase();
+              break;
+            case 'l': // Lowercase
+              value.toLowerCase();
               break;
             default:
               newString += F("ERR");
@@ -2069,7 +1884,7 @@ float pop()
   if (sp != (globalstack - 1)) // empty
     return *(sp--);
   else
-    return 0.0;
+    return 0.0f;
 }
 
 float apply_operator(char op, float first, float second)
@@ -2417,9 +2232,9 @@ void SendValueLogger(taskIndex_t TaskIndex)
       LoadTaskSettings(TaskIndex);
       for (byte varNr = 0; varNr < Device[DeviceIndex].ValueCount; varNr++)
       {
-        logger += getDateString('-');
+        logger += node_time.getDateString('-');
         logger += ' ';
-        logger += getTimeString(':');
+        logger += node_time.getTimeString(':');
         logger += ',';
         logger += Settings.Unit;
         logger += ',';
@@ -2446,115 +2261,6 @@ void SendValueLogger(taskIndex_t TaskIndex)
 }
 
 
-#define TRACES 3                                            // number of memory traces
-#define TRACEENTRIES 15                                      // entries per trace
-
-class RamTracker{
-  private:
-    String        traces[TRACES]  ;                         // trace of latest memory checks
-    unsigned int  tracesMemory[TRACES] ;                    // lowest memory for that  trace
-    unsigned int  readPtr, writePtr;                        // pointer to cyclic buffer
-    String        nextAction[TRACEENTRIES];                 // buffer to record the names of functions before they are transfered to a trace
-    unsigned int  nextActionStartMemory[TRACEENTRIES];      // memory levels for the functions.
-
-    unsigned int  bestCaseTrace (void){                     // find highest the trace with the largest minimum memory (gets replaced by worse one)
-       unsigned int lowestMemoryInTrace = 0;
-       unsigned int lowestMemoryInTraceIndex=0;
-       for (int i = 0; i<TRACES; i++) {
-          if (tracesMemory[i] > lowestMemoryInTrace){
-            lowestMemoryInTrace= tracesMemory[i];
-            lowestMemoryInTraceIndex=i;
-            }
-          }
-      //serialPrintln(lowestMemoryInTraceIndex);
-      return lowestMemoryInTraceIndex;
-      }
-
-  public:
-    RamTracker(void){                                       // constructor
-        readPtr=0;
-        writePtr=0;
-        for (int i = 0; i< TRACES; i++) {
-          traces[i]="";
-          tracesMemory[i]=0xffffffff;                           // init with best case memory values, so they get replaced if memory goes lower
-          }
-        for (int i = 0; i< TRACEENTRIES; i++) {
-          nextAction[i]="startup";
-          nextActionStartMemory[i] = ESP.getFreeHeap();     // init with best case memory values, so they get replaced if memory goes lower
-          }
-        };
-
-    void registerRamState(const String &s){    // store function
-       nextAction[writePtr]=s;                              // name and mem
-       nextActionStartMemory[writePtr]=ESP.getFreeHeap();   // in cyclic buffer.
-       int bestCase = bestCaseTrace();                      // find best case memory trace
-       if ( ESP.getFreeHeap() < tracesMemory[bestCase]){    // compare to current memory value
-            traces[bestCase]="";
-            readPtr = writePtr+1;                           // read out buffer, oldest value first
-            if (readPtr>=TRACEENTRIES) readPtr=0;           // read pointer wrap around
-            tracesMemory[bestCase] = ESP.getFreeHeap();     // store new lowest value of that trace
-
-            for (int i = 0; i<TRACEENTRIES; i++) {          // tranfer cyclic buffer strings and mem values to this trace
-              traces[bestCase]+= nextAction[readPtr];
-              traces[bestCase]+= "-> ";
-              traces[bestCase]+= String(nextActionStartMemory[readPtr]);
-              traces[bestCase]+= ' ';
-              readPtr++;
-              if (readPtr >=TRACEENTRIES) readPtr=0;      // wrap around read pointer
-            }
-       }
-       writePtr++;
-       if (writePtr >= TRACEENTRIES) writePtr=0;          // inc write pointer and wrap around too.
-    };
-   void getTraceBuffer(){                                // return giant strings, one line per trace. Add stremToWeb method to avoid large strings.
-#ifndef BUILD_NO_DEBUG
-      if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
-        String retval="Memtrace\n";
-        for (int i = 0; i< TRACES; i++){
-          retval += String(i);
-          retval += ": lowest: ";
-          retval += String(tracesMemory[i]);
-          retval += "  ";
-          retval += traces[i];
-          addLog(LOG_LEVEL_DEBUG_DEV, retval);
-          retval="";
-        }
-      }
-#endif
-    }
-}myRamTracker;                                              // instantiate class. (is global now)
-
-void checkRAMtoLog(void){
-  myRamTracker.getTraceBuffer();
-}
-
-void checkRAM(const String &flashString, int a ) {
-  checkRAM(flashString, String(a));
-}
-
-void checkRAM(const String &flashString, const String &a ) {
-  String s = flashString;
-  s += " (";
-  s += a;
-  s += ')';
-  checkRAM(s);
-}
-
-void checkRAM( const String &descr ) {
-  myRamTracker.registerRamState(descr);
-  
-  uint32_t freeRAM = FreeMem();
-  if (freeRAM <= lowestRAM)
-  {
-    lowestRAM = freeRAM;
-    lowestRAMfunction = descr;
-  }
-  uint32_t freeStack = getFreeStackWatermark();
-  if (freeStack <= lowestFreeStack) {
-    lowestFreeStack = freeStack;
-    lowestFreeStackfunction = descr;
-  }
-}
 
 
 //#ifdef PLUGIN_BUILD_TESTING
@@ -2566,7 +2272,7 @@ void checkRAM( const String &descr ) {
   \*********************************************************************************************/
 void tone_espEasy(uint8_t _pin, unsigned int frequency, unsigned long duration) {
   #ifdef ESP32
-    delay(duration);
+    toneESP32(_pin,frequency,duration);
   #else
     analogWriteFreq(frequency);
     //NOTE: analogwrite reserves IRAM and uninitalized ram.
@@ -2661,8 +2367,6 @@ void play_rtttl(uint8_t _pin, const char *p )
     else duration = wholenote / default_dur;  // we will need to check if we are a dotted note after
 
     // now get the note
-    note = 0;
-
     switch(*p)
     {
       case 'c':
@@ -2755,6 +2459,10 @@ bool OTA_possible(uint32_t& maxSketchSize, bool& use2step) {
   maxSketchSize -= 16; // Must leave 16 bytes at the end.
   if (maxSketchSize > MAX_SKETCH_SIZE) maxSketchSize = MAX_SKETCH_SIZE;
   return otaPossible;
+#elif defined(ESP32)
+  maxSketchSize = MAX_SKETCH_SIZE;
+  use2step = false;
+  return true;
 #else
   return false;
 #endif
@@ -2770,14 +2478,14 @@ void ArduinoOTAInit()
   checkRAM(F("ArduinoOTAInit"));
 
   ArduinoOTA.setPort(ARDUINO_OTA_PORT);
-  ArduinoOTA.setHostname(Settings.Name);
+  ArduinoOTA.setHostname(Settings.getHostname().c_str());
   if (SecuritySettings.Password[0]!=0)
     ArduinoOTA.setPassword(SecuritySettings.Password);
 
   ArduinoOTA.onStart([]() {
       serialPrintln(F("OTA  : Start upload"));
       ArduinoOTAtriggered = true;
-      SPIFFS.end(); //important, otherwise it fails
+      ESPEASY_FS.end(); //important, otherwise it fails
   });
 
   ArduinoOTA.onEnd([]() {
@@ -2815,63 +2523,8 @@ void ArduinoOTAInit()
 
 #endif
 
-int calc_CRC16(const String& text) {
-  return calc_CRC16(text.c_str(), text.length());
-}
-
-int calc_CRC16(const char *ptr, int count)
-{
-    int  crc;
-    crc = 0;
-    while (--count >= 0)
-    {
-        crc = crc ^ (int) *ptr++ << 8;
-        char i = 8;
-        do
-        {
-            if (crc & 0x8000)
-                crc = crc << 1 ^ 0x1021;
-            else
-                crc = crc << 1;
-        } while(--i);
-    }
-    return crc;
-}
-
-uint32_t calc_CRC32(const uint8_t *data, size_t length) {
-  uint32_t crc = 0xffffffff;
-  while (length--) {
-    uint8_t c = *data++;
-    for (uint32_t i = 0x80; i > 0; i >>= 1) {
-      bool bit = crc & 0x80000000;
-      if (c & i) {
-        bit = !bit;
-      }
-      crc <<= 1;
-      if (bit) {
-        crc ^= 0x04c11db7;
-      }
-    }
-  }
-  return crc;
-}
 
 
-// Compute the dew point temperature, given temperature and humidity (temp in Celcius)
-// Formula: http://www.ajdesigner.com/phphumidity/dewpoint_equation_dewpoint_temperature.php
-// Td = (f/100)^(1/8) * (112 + 0.9*T) + 0.1*T - 112
-float compute_dew_point_temp(float temperature, float humidity_percentage) {
-  return pow(humidity_percentage / 100.0, 0.125) *
-         (112.0 + 0.9*temperature) + 0.1*temperature - 112.0;
-}
-
-// Compute the humidity given temperature and dew point temperature (temp in Celcius)
-// Formula: http://www.ajdesigner.com/phphumidity/dewpoint_equation_relative_humidity.php
-// f = 100 * ((112 - 0.1*T + Td) / (112 + 0.9 * T))^8
-float compute_humidity_from_dewpoint(float temperature, float dew_temperature) {
-  return 100.0 * pow((112.0 - 0.1 * temperature + dew_temperature) /
-                     (112.0 + 0.9 * temperature), 8);
-}
 
 /**********************************************************
 *                                                         *
@@ -2939,26 +2592,26 @@ uint16_t getPortFromKey(uint32_t key) {
 void HSV2RGB(float H, float S, float I, int rgb[3]) {
   int r, g, b;
   H = fmod(H,360); // cycle H around to 0-360 degrees
-  H = 3.14159*H/(float)180; // Convert to radians.
+  H = 3.14159f*H/(float)180; // Convert to radians.
   S = S / 100;
   S = S>0?(S<1?S:1):0; // clamp S and I to interval [0,1]
   I = I / 100;
   I = I>0?(I<1?I:1):0;
 
   // Math! Thanks in part to Kyle Miller.
-  if(H < 2.09439) {
-    r = 255*I/3*(1+S*cos(H)/cos(1.047196667-H));
-    g = 255*I/3*(1+S*(1-cos(H)/cos(1.047196667-H)));
+  if(H < 2.09439f) {
+    r = 255*I/3*(1+S*cos(H)/cos(1.047196667f-H));
+    g = 255*I/3*(1+S*(1-cos(H)/cos(1.047196667f-H)));
     b = 255*I/3*(1-S);
-  } else if(H < 4.188787) {
-    H = H - 2.09439;
-    g = 255*I/3*(1+S*cos(H)/cos(1.047196667-H));
-    b = 255*I/3*(1+S*(1-cos(H)/cos(1.047196667-H)));
+  } else if(H < 4.188787f) {
+    H = H - 2.09439f;
+    g = 255*I/3*(1+S*cos(H)/cos(1.047196667f-H));
+    b = 255*I/3*(1+S*(1-cos(H)/cos(1.047196667f-H)));
     r = 255*I/3*(1-S);
   } else {
-    H = H - 4.188787;
-    b = 255*I/3*(1+S*cos(H)/cos(1.047196667-H));
-    r = 255*I/3*(1+S*(1-cos(H)/cos(1.047196667-H)));
+    H = H - 4.188787f;
+    b = 255*I/3*(1+S*cos(H)/cos(1.047196667f-H));
+    r = 255*I/3*(1+S*(1-cos(H)/cos(1.047196667f-H)));
     g = 255*I/3*(1-S);
   }
   rgb[0]=r;
@@ -2973,31 +2626,31 @@ void HSV2RGBW(float H, float S, float I, int rgbw[4]) {
   int r, g, b, w;
   float cos_h, cos_1047_h;
   H = fmod(H,360); // cycle H around to 0-360 degrees
-  H = 3.14159*H/(float)180; // Convert to radians.
+  H = 3.14159f*H/(float)180; // Convert to radians.
   S = S / 100;
   S = S>0?(S<1?S:1):0; // clamp S and I to interval [0,1]
   I = I / 100;
   I = I>0?(I<1?I:1):0;
 
-  if(H < 2.09439) {
+  if(H < 2.09439f) {
     cos_h = cos(H);
-    cos_1047_h = cos(1.047196667-H);
+    cos_1047_h = cos(1.047196667f-H);
     r = S*255*I/3*(1+cos_h/cos_1047_h);
     g = S*255*I/3*(1+(1-cos_h/cos_1047_h));
     b = 0;
     w = 255*(1-S)*I;
-  } else if(H < 4.188787) {
-    H = H - 2.09439;
+  } else if(H < 4.188787f) {
+    H = H - 2.09439f;
     cos_h = cos(H);
-    cos_1047_h = cos(1.047196667-H);
+    cos_1047_h = cos(1.047196667f-H);
     g = S*255*I/3*(1+cos_h/cos_1047_h);
     b = S*255*I/3*(1+(1-cos_h/cos_1047_h));
     r = 0;
     w = 255*(1-S)*I;
   } else {
-    H = H - 4.188787;
+    H = H - 4.188787f;
     cos_h = cos(H);
-    cos_1047_h = cos(1.047196667-H);
+    cos_1047_h = cos(1.047196667f-H);
     b = S*255*I/3*(1+cos_h/cos_1047_h);
     r = S*255*I/3*(1+(1-cos_h/cos_1047_h));
     g = 0;
@@ -3008,4 +2661,29 @@ void HSV2RGBW(float H, float S, float I, int rgbw[4]) {
   rgbw[1]=g;
   rgbw[2]=b;
   rgbw[3]=w;
+}
+
+
+// Simple bitwise get/set functions
+
+uint8_t get8BitFromUL(uint32_t number, byte bitnr) {
+  return (number >> bitnr) & 0xFF;
+}
+
+void set8BitToUL(uint32_t& number, byte bitnr, uint8_t value) {
+  uint32_t mask     = (0xFFUL << bitnr);
+  uint32_t newvalue = ((value << bitnr) & mask);
+
+  number = (number & ~mask) | newvalue;
+}
+
+uint8_t get4BitFromUL(uint32_t number, byte bitnr) {
+  return (number >> bitnr) &  0x0F;
+}
+
+void set4BitToUL(uint32_t& number, byte bitnr, uint8_t value) {
+  uint32_t mask     = (0x0FUL << bitnr);
+  uint32_t newvalue = ((value << bitnr) & mask);
+
+  number = (number & ~mask) | newvalue;
 }

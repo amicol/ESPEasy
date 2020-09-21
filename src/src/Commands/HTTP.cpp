@@ -4,6 +4,8 @@
 #include "../Commands/Common.h"
 #include "../../ESPEasy_Log.h"
 #include "../../src/DataStructs/ControllerSettingsStruct.h"
+#include "../../src/DataStructs/SettingsStruct.h"
+#include "../../src/Globals/Settings.h"
 
 #include "../../ESPEasy_fdwdecl.h"
 #include "../../ESPEasy_common.h"
@@ -12,7 +14,7 @@
 
 String Command_HTTP_SendToHTTP(struct EventStruct *event, const char* Line)
 {
-	if (WiFiConnected()) {
+	if (NetworkConnected()) {
 		String host = parseString(Line, 2);
 		const int port = parseCommandArgumentInt(Line, 2);
 		if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
@@ -22,7 +24,7 @@ String Command_HTTP_SendToHTTP(struct EventStruct *event, const char* Line)
 			log += port;
 			addLog(LOG_LEVEL_DEBUG, log);
 		}
-		if (!port < 0 || port > 65535) return return_command_failed();
+		if (port < 0 || port > 65535) return return_command_failed();
 		// FIXME TD-er: This is not using the tolerant settings option.
     // String path = tolerantParseStringKeepCase(Line, 4);
 		String path = parseStringToEndKeepCase(Line, 4);
@@ -34,7 +36,7 @@ String Command_HTTP_SendToHTTP(struct EventStruct *event, const char* Line)
 		}
 #endif
 		WiFiClient client;
-		client.setTimeout(CONTROLLER_CLIENTTIMEOUT_DFLT);
+		client.setTimeout(CONTROLLER_CLIENTTIMEOUT_MAX);
 		const bool connected = connectClient(client, host.c_str(), port);
 		if (connected) {
 			String hostportString = host;
@@ -46,7 +48,8 @@ String Command_HTTP_SendToHTTP(struct EventStruct *event, const char* Line)
 #ifndef BUILD_NO_DEBUG
 			addLog(LOG_LEVEL_DEBUG, request);
 #endif
-			send_via_http(F("Command_HTTP_SendToHTTP"), client, request, false);
+            bool mustCheckAck = Settings.SendToHttp_ack();
+			send_via_http(F("Command_HTTP_SendToHTTP"), client, request, mustCheckAck);
 		}
 	}
 	return return_command_success();

@@ -3,6 +3,7 @@
 //#################################### Plugin 026: System Info ##########################################
 //#######################################################################################################
 
+#include "_Plugin_Helper.h"
 
 #include "ESPEasy_packed_raw_data.h"
 
@@ -200,7 +201,7 @@ float P026_get_value(int type)
 # if FEATURE_ADC_VCC
       value = vcc;
 # else // if FEATURE_ADC_VCC
-      value = -1.0;
+      value = -1.0f;
 # endif // if FEATURE_ADC_VCC
       break;
     }
@@ -211,22 +212,22 @@ float P026_get_value(int type)
     }
     case 5:
     {
-      value = WiFi.localIP()[0];
+      value = NetworkLocalIP()[0];
       break;
     }
     case 6:
     {
-      value = WiFi.localIP()[1];
+      value = NetworkLocalIP()[1];
       break;
     }
     case 7:
     {
-      value = WiFi.localIP()[2];
+      value = NetworkLocalIP()[2];
       break;
     }
     case 8:
     {
-      value = WiFi.localIP()[3];
+      value = NetworkLocalIP()[3];
       break;
     }
     case 9:

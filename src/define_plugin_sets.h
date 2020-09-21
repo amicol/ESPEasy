@@ -104,7 +104,7 @@ To create/register a plugin, you have to :
     #ifndef WEBSERVER_WIFI_SCANNER
         #define WEBSERVER_WIFI_SCANNER
     #endif
-#endif 
+#endif
 
 #ifndef USE_CUSTOM_H
     #ifndef USES_SSDP
@@ -159,12 +159,32 @@ To create/register a plugin, you have to :
 #endif
 
 #ifdef PLUGIN_BUILD_MINIMAL_IR
+    #ifndef USES_DOMOTICZ
+        #define USES_DOMOTICZ
+    #endif
+    #ifndef USES_FHEM
+        #define USES_FHEM
+    #endif
+    #ifndef USES_HOMEASSISTANT_OPENHAB
+        #define USES_HOMEASSISTANT_OPENHAB
+    #endif
+
     #define PLUGIN_BUILD_MINIMAL_OTA
     #define PLUGIN_DESCR  "Minimal, IR"
     #define PLUGIN_BUILD_IR
 #endif
 
 #ifdef PLUGIN_BUILD_MINIMAL_IRext
+    #ifndef USES_DOMOTICZ
+        #define USES_DOMOTICZ
+    #endif
+    #ifndef USES_FHEM
+        #define USES_FHEM
+    #endif
+    #ifndef USES_HOMEASSISTANT_OPENHAB
+        #define USES_HOMEASSISTANT_OPENHAB
+    #endif
+
     #define PLUGIN_BUILD_MINIMAL_OTA
     #define PLUGIN_DESCR  "Minimal, IR with AC"
     #define PLUGIN_BUILD_IR_EXTENDED
@@ -207,9 +227,21 @@ To create/register a plugin, you have to :
     #define  CONTROLLER_SET_STABLE
     #define  NOTIFIER_SET_STABLE
 
+    #ifndef FEATURE_I2CMULTIPLEXER
+        #define FEATURE_I2CMULTIPLEXER
+    #endif
+
     #ifndef BUILD_NO_DEBUG
       #define BUILD_NO_DEBUG
     #endif
+#endif
+
+#ifdef USES_FHEM
+    #define USES_C009   // FHEM HTTP
+#endif
+
+#ifdef USES_HOMEASSISTANT_OPENHAB
+    #define USES_C005   // Home Assistant (openHAB) MQTT
 #endif
 
 #ifdef PLUGIN_BUILD_MINIMAL_OTA
@@ -224,12 +256,12 @@ To create/register a plugin, you have to :
       #define BUILD_NO_DEBUG
     #endif
 
-    #define USES_C001   // Domoticz HTTP
-    #define USES_C002   // Domoticz MQTT
-    #define USES_C005   // Home Assistant (openHAB) MQTT
+//    #define USES_C001   // Domoticz HTTP
+//    #define USES_C002   // Domoticz MQTT
+//    #define USES_C005   // Home Assistant (openHAB) MQTT
 //    #define USES_C006   // PiDome MQTT
     #define USES_C008   // Generic HTTP
-    #define USES_C009   // FHEM HTTP
+//    #define USES_C009   // FHEM HTTP
 //    #define USES_C010   // Generic UDP
     #define USES_C013   // ESPEasy P2P network
 
@@ -306,6 +338,15 @@ To create/register a plugin, you have to :
             #undef USES_SSDP
         #endif
     #endif // WEBSERVER_CUSTOM_BUILD_DEFINED
+
+    #ifndef LIMIT_BUILD_SIZE
+        #define LIMIT_BUILD_SIZE
+    #endif
+
+    #ifdef USES_SSDP
+      #undef USES_SSDP
+    #endif
+
 #endif
 
 
@@ -375,7 +416,6 @@ To create/register a plugin, you have to :
 
     #define PLUGIN_SET_ONLY_SWITCH
     #define PLUGIN_SET_ONLY_TEMP_HUM
-    #define USES_P021
 #endif
 
 #ifdef PLUGIN_SET_SONOFF_POW
@@ -398,10 +438,6 @@ To create/register a plugin, you have to :
 #ifdef PLUGIN_SET_SONOFF_4CH
     #define PLUGIN_DESCR  "Sonoff 4CH"
     #define PLUGIN_SET_ONLY_SWITCH
-    #define PLUGIN_SET_ONLY_TEMP_HUM
-    #define USES_P021
-    #define USES_P220
-  //  #define USES_P221
 #endif
 
 #ifdef PLUGIN_SET_SONOFF_TOUCH
@@ -416,6 +452,16 @@ To create/register a plugin, you have to :
     #define PLUGIN_SET_ONLY_SWITCH
     #define CONTROLLER_SET_STABLE
     #define NOTIFIER_SET_STABLE
+#endif
+
+#ifdef PLUGIN_SET_SHELLY_PLUG_S
+    #define PLUGIN_DESCR  "Shelly PLUG-S"
+
+    #define PLUGIN_SET_ONLY_SWITCH
+    #define CONTROLLER_SET_STABLE
+    #define NOTIFIER_SET_STABLE
+    #define USES_P076   // HWL8012   in POW r1
+    #define USES_P081   // Cron
 #endif
 
 // Easy ----------------------------
@@ -515,6 +561,17 @@ To create/register a plugin, you have to :
     #define USES_P046      // TESTING	Hardware	P046_VentusW266.ino
 #endif
 
+
+#ifdef PLUGIN_SET_LC_TECH_RELAY_X2
+    #define CONTROLLER_SET_STABLE
+    #define PLUGIN_SET_ONLY_SWITCH
+    #define USES_P026    // Sysinfo
+    #define USES_P029    // Domoticz MQTT Helper
+    #define USES_P033    // Dummy
+    #define USES_P037    // MQTT import
+    #define USES_P081    // Cron
+    #define USES_P091    // Ser Switch
+#endif
 
 
 
@@ -667,7 +724,9 @@ To create/register a plugin, you have to :
 
 // STABLE #####################################
 #ifdef PLUGIN_SET_STABLE
-    #define USE_SERVO
+    #ifndef DONT_USE_SERVO
+        #define USE_SERVO
+    #endif
 
     #define USES_P001   // Switch
     #define USES_P002   // ADC
@@ -759,6 +818,11 @@ To create/register a plugin, you have to :
 
 // TESTING #####################################
 #ifdef PLUGIN_SET_TESTING
+  #ifndef LIMIT_BUILD_SIZE
+    #define LIMIT_BUILD_SIZE
+  #endif
+
+
     #define USES_P045   // MPU6050
     #define USES_P047   // I2C_soil_misture
     #define USES_P048   // Motoshield_v2
@@ -799,7 +863,16 @@ To create/register a plugin, you have to :
     #define USES_P085   // AcuDC24x
     #define USES_P086   // Receiving values according Homie convention. Works together with C014 Homie controller
     //#define USES_P087   // Serial Proxy
-    #define USES_P089   // Serial Proxy
+    #define USES_P089   // Ping
+    #define USES_P090   // CCS811 TVOC/eCO2 Sensor
+    #define USES_P091	// SerSwitch
+    #define USES_P092   // DL-Bus
+    #define USES_P093   // Mitsubishi Heat Pump
+    //#define USES_P094  // CUL Reader
+    //#define USES_P095  // TFT ILI9341
+    //#define USES_P096  // eInk   (Needs lib_deps = Adafruit GFX Library, LOLIN_EPD )
+    #define USES_P097   // Touch (ESP32)
+    #define USES_P100   // Pulse Counter - DS2423
 #endif
 
 
@@ -908,7 +981,7 @@ To create/register a plugin, you have to :
  * Remove incompatible plugins ************************************************
 \******************************************************************************/
 #ifdef PLUGIN_SET_TEST_ESP32
-  #undef USES_P010   // BH1750          (doesn't work yet on ESP32)
+//  #undef USES_P010   // BH1750          (doesn't work yet on ESP32)
 //  #undef USES_P049   // MHZ19           (doesn't work yet on ESP32)
 
 //  #undef USES_P052   // SenseAir        (doesn't work yet on ESP32)
@@ -939,7 +1012,7 @@ To create/register a plugin, you have to :
 /******************************************************************************\
  * Libraries dependencies *****************************************************
 \******************************************************************************/
-#if defined(USES_P049) || defined(USES_P052) || defined(USES_P053) || defined(USES_P056) || defined(USES_P071) || defined(USES_P075) || defined(USES_P082) || defined(USES_P087)
+#if defined(USES_P049) || defined(USES_P052) || defined(USES_P053) || defined(USES_P056) || defined(USES_P071) || defined(USES_P075) || defined(USES_P082) || defined(USES_P087) || defined(USES_P094)
 // At least one plugin uses serial.
 #else
   // No plugin uses serial, so make sure software serial is not included.
@@ -963,7 +1036,21 @@ To create/register a plugin, you have to :
 #endif
 
 #if defined(USES_C001) || defined (USES_C002) || defined(USES_P029)
-  #define USES_DOMOTICZ
+  #ifndef USES_DOMOTICZ
+    #define USES_DOMOTICZ
+  #endif
+#endif
+
+#ifdef USES_DOMOTICZ  // Move Domoticz enabling logic together
+    #ifndef USES_C001
+      #define USES_C001   // Domoticz HTTP
+    #endif
+    #ifndef USES_C002
+      #define USES_C002   // Domoticz MQTT
+    #endif
+    #ifndef USES_P029
+      #define USES_P029   // Output
+    #endif
 #endif
 
 #if defined(USES_C002) || defined (USES_C005) || defined(USES_C006) || defined(USES_C014) || defined(USES_P037)
@@ -974,6 +1061,13 @@ To create/register a plugin, you have to :
   #define USES_BLYNK
 #endif
 
+// Specific notifier plugins may be enabled via Custom.h, regardless
+// whether NOTIFIER_SET_NONE is defined
+#if defined(USES_N001) || defined(USES_N002)
+  #ifndef USES_NOTIFIER
+    #define USES_NOTIFIER
+  #endif
+#endif
 
 
 #ifdef USES_MQTT
@@ -989,15 +1083,55 @@ To create/register a plugin, you have to :
   #undef USES_C014
 #endif
 
+// VCC builds need a bit more, disable timing stats to make it fit.
+#ifdef FEATURE_ADC_VCC
+  #ifndef LIMIT_BUILD_SIZE
+    #define LIMIT_BUILD_SIZE
+  #endif
+#endif
+
 
 // Due to size restrictions, disable a few plugins/controllers for 1M builds
 #ifdef SIZE_1M
   #ifdef USES_C003
     #undef USES_C003
   #endif
+  #ifndef LIMIT_BUILD_SIZE
+    #define LIMIT_BUILD_SIZE
+  #endif
 #endif
 
+// Disable some diagnostic parts to make builds fit.
+#ifdef LIMIT_BUILD_SIZE
+  #ifdef WEBSERVER_TIMINGSTATS
+    #undef WEBSERVER_TIMINGSTATS
+  #endif
 
+  #ifndef BUILD_NO_DEBUG
+    #define BUILD_NO_DEBUG
+  #endif
+  #ifdef FEATURE_I2CMULTIPLEXER
+    #undef FEATURE_I2CMULTIPLEXER
+  #endif
+  #ifdef USE_SERVO
+    #undef USE_SERVO
+  #endif
+  #ifdef USES_BLYNK
+    #undef USES_BLYNK
+  #endif
+  #ifdef USES_C017 // Zabbix
+    #undef USES_C017
+  #endif
+  #ifdef USES_P092
+    #undef USES_P092   // DL-Bus
+  #endif
+  #ifdef USES_P093
+    #undef USES_P093   // Mitsubishi Heat Pump
+  #endif
+  #ifdef USES_P100 // Pulse Counter - DS2423
+    #undef USES_P100
+  #endif
+#endif
 
 // Timing stats page needs timing stats
 #if defined(WEBSERVER_TIMINGSTATS) && !defined(USES_TIMING_STATS)
@@ -1007,6 +1141,27 @@ To create/register a plugin, you have to :
 // If timing stats page is not included, there is no need in collecting the stats
 #if !defined(WEBSERVER_TIMINGSTATS) && defined(USES_TIMING_STATS)
   #undef USES_TIMING_STATS
+#endif
+
+
+#ifdef BUILD_NO_DEBUG
+  #ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
+    #define BUILD_NO_DIAGNOSTIC_COMMANDS
+  #endif
+  #ifndef BUILD_NO_RAM_TRACKER
+    #define BUILD_NO_RAM_TRACKER
+  #endif
+
+#endif
+
+// It may have gotten undefined to fit a build. Make sure the Blynk controllers are not defined
+#ifndef USES_BLYNK
+  #ifdef USES_C012
+    #undef USES_C012
+  #endif
+  #ifdef USES_C015
+    #undef USES_C015
+  #endif
 #endif
 
 

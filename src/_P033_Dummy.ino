@@ -3,6 +3,8 @@
 //#################################### Plugin 033: Dummy ################################################
 //#######################################################################################################
 
+#include "_Plugin_Helper.h"
+
 #define PLUGIN_033
 #define PLUGIN_ID_033         33
 #define PLUGIN_NAME_033       "Generic - Dummy Device"
@@ -39,6 +41,7 @@ boolean Plugin_033(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_GET_DEVICEVALUENAMES:
       {
+        // FIXME TD-er: Copy names as done in P026_Sysinfo.ino.
         strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_033));
         break;
       }
@@ -110,7 +113,7 @@ boolean Plugin_033(byte function, struct EventStruct *event, String& string)
                 log += F(" value ");
                 log += event->Par2;
                 log += F(" parameter3: ");
-                log += parseString(string, 4);
+                log += parseStringKeepCase(string, 4);
                 log += F(" not a float value!");
                 addLog(LOG_LEVEL_ERROR,log);
               }

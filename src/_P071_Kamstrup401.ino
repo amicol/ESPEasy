@@ -12,6 +12,8 @@
 
 
 #include <ESPeasySerial.h>
+#include "_Plugin_Helper.h"
+
 #define PLUGIN_071
 #define PLUGIN_ID_071 71
 #define PLUGIN_NAME_071 "Communication - Kamstrup Multical 401 [TESTING]"
@@ -31,7 +33,7 @@ boolean Plugin_071(byte function, struct EventStruct *event, String& string)
     case PLUGIN_DEVICE_ADD:
       {
         Device[++deviceCount].Number = PLUGIN_ID_071;
-        Device[deviceCount].Type = DEVICE_TYPE_DUAL;
+        Device[deviceCount].Type = DEVICE_TYPE_SERIAL;
         Device[deviceCount].VType = SENSOR_TYPE_DUAL;
         Device[deviceCount].Ports = 0;
         Device[deviceCount].PullUpOption = false;
@@ -180,25 +182,25 @@ boolean Plugin_071(byte function, struct EventStruct *event, String& string)
 
               tmpstr = strtok(NULL, " ");
               if (tmpstr)
-               m_tempin = atol(tmpstr)/100.0;
+               m_tempin = atol(tmpstr)/100.0f;
               else
                m_tempin = 0;
 
               tmpstr = strtok(NULL, " ");
               if (tmpstr)
-               m_tempout = atol(tmpstr)/100.0;
+               m_tempout = atol(tmpstr)/100.0f;
               else
                m_tempout = 0;
 
               tmpstr = strtok(NULL, " ");
               if (tmpstr)
-               m_tempdiff = atol(tmpstr)/100.0;
+               m_tempdiff = atol(tmpstr)/100.0f;
               else
                m_tempdiff = 0;
 
               tmpstr = strtok(NULL, " ");
               if (tmpstr)
-               m_power = atol(tmpstr)/10.0;
+               m_power = atol(tmpstr)/10.0f;
               else
                m_power = 0;
 

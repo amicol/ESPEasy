@@ -40,6 +40,7 @@
 #define PLUGIN_049_FILTER_SLOW       5
 
 #include <ESPeasySerial.h>
+#include "_Plugin_Helper.h"
 
 enum MHZ19Types {
   MHZ19_notDetected,
@@ -139,7 +140,10 @@ struct P049_data_struct : public PluginTaskData_base {
     if (serial_rx < 0 || serial_tx < 0)
       return false;
     reset();
-    easySerial = new ESPeasySerial(serial_rx, serial_tx);
+    easySerial = new (std::nothrow) ESPeasySerial(serial_rx, serial_tx);
+    if (easySerial == nullptr) {
+      return false;
+    }
     easySerial->begin(9600);
     ABC_Disable = setABCdisabled;
     if (ABC_Disable) {
@@ -360,7 +364,7 @@ boolean Plugin_049(byte function, struct EventStruct *event, String& string)
     case PLUGIN_DEVICE_ADD:
       {
         Device[++deviceCount].Number = PLUGIN_ID_049;
-        Device[deviceCount].Type = DEVICE_TYPE_DUAL;
+        Device[deviceCount].Type = DEVICE_TYPE_SERIAL;
         Device[deviceCount].VType = SENSOR_TYPE_TRIPLE;
         Device[deviceCount].Ports = 0;
         Device[deviceCount].PullUpOption = false;
@@ -442,13 +446,12 @@ boolean Plugin_049(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
       {
-        initPluginTaskData(event->TaskIndex, new P049_data_struct());
+        initPluginTaskData(event->TaskIndex, new (std::nothrow) P049_data_struct());
         success = P049_performInit(event);
         break;
       }
 
     case PLUGIN_EXIT: {
-      clearPluginTaskData(event->TaskIndex);
       success = true;
       break;
     }
@@ -631,7 +634,7 @@ bool P049_performInit(struct EventStruct *event) {
 
     //delay first read, because hardware needs to initialize on cold boot
     //otherwise we get a weird value or read error
-    schedule_task_device_timer(event->TaskIndex, millis() + 15000);
+    Scheduler.schedule_task_device_timer(event->TaskIndex, millis() + 15000);
   }
   return success;
 }

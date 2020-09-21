@@ -1,3 +1,4 @@
+#include "_CPlugin_Helper.h"
 #ifdef USES_C007
 //#######################################################################################################
 //########################### Controller Plugin 007: Emoncms ############################################
@@ -7,13 +8,13 @@
 #define CPLUGIN_ID_007         7
 #define CPLUGIN_NAME_007       "Emoncms"
 
-bool CPlugin_007(byte function, struct EventStruct *event, String& string)
+bool CPlugin_007(CPlugin::Function function, struct EventStruct *event, String& string)
 {
   bool success = false;
 
   switch (function)
   {
-    case CPLUGIN_PROTOCOL_ADD:
+    case CPlugin::Function::CPLUGIN_PROTOCOL_ADD:
       {
         Protocol[++protocolCount].Number = CPLUGIN_ID_007;
         Protocol[protocolCount].usesMQTT = false;
@@ -24,22 +25,30 @@ bool CPlugin_007(byte function, struct EventStruct *event, String& string)
         break;
       }
 
-    case CPLUGIN_GET_DEVICENAME:
+    case CPlugin::Function::CPLUGIN_GET_DEVICENAME:
       {
         string = F(CPLUGIN_NAME_007);
         break;
       }
 
-    case CPLUGIN_INIT:
+    case CPlugin::Function::CPLUGIN_INIT:
       {
-        MakeControllerSettings(ControllerSettings);
-        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
-        C007_DelayHandler.configureControllerSettings(ControllerSettings);
+        success = init_c004_delay_queue(event->ControllerIndex);
         break;
       }
 
-    case CPLUGIN_PROTOCOL_SEND:
+    case CPlugin::Function::CPLUGIN_EXIT:
       {
+        exit_c007_delay_queue();
+        break;
+      }
+
+    case CPlugin::Function::CPLUGIN_PROTOCOL_SEND:
+      {
+        if (C007_DelayHandler == nullptr) {
+          break;
+        }
+
         if (event->sensorType == SENSOR_TYPE_STRING) {
           addLog(LOG_LEVEL_ERROR, F("emoncms : No support for SENSOR_TYPE_STRING"));
           break;
@@ -49,24 +58,30 @@ bool CPlugin_007(byte function, struct EventStruct *event, String& string)
           addLog(LOG_LEVEL_ERROR, F("emoncms : Unknown sensortype or too many sensor values"));
           break;
         }
-        success = C007_DelayHandler.addToQueue(C007_queue_element(event));
-        scheduleNextDelayQueue(TIMER_C007_DELAY_QUEUE, C007_DelayHandler.getNextScheduleTime());
+        success = C007_DelayHandler->addToQueue(C007_queue_element(event));
+        Scheduler.scheduleNextDelayQueue(ESPEasy_Scheduler::IntervalTimer_e::TIMER_C007_DELAY_QUEUE, C007_DelayHandler->getNextScheduleTime());
         break;
       }
 
-    case CPLUGIN_FLUSH:
+    case CPlugin::Function::CPLUGIN_FLUSH:
       {
         process_c007_delay_queue();
         delay(0);
         break;
       }
 
+    default:
+      break;
+
 
   }
   return success;
 }
 
+// Uncrustify may change this into multi line, which will result in failed builds
+// *INDENT-OFF*
 bool do_process_c007_delay_queue(int controller_number, const C007_queue_element& element, ControllerSettingsStruct& ControllerSettings);
+// *INDENT-ON*
 
 bool do_process_c007_delay_queue(int controller_number, const C007_queue_element& element, ControllerSettingsStruct& ControllerSettings) {
   WiFiClient client;
@@ -86,7 +101,7 @@ bool do_process_c007_delay_queue(int controller_number, const C007_queue_element
   }
   url += "}";
   url += F("&apikey=");
-  url += SecuritySettings.ControllerPassword[element.controller_idx]; // "0UDNN17RW6XAS2E5" // api key
+  url += getControllerPass(element.controller_idx, ControllerSettings); // "0UDNN17RW6XAS2E5" // api key
 
   if (Settings.SerialLogLevel >= LOG_LEVEL_DEBUG_MORE)
     serialPrintln(url);

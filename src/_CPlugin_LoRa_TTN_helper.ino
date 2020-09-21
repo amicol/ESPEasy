@@ -21,6 +21,15 @@ String getPackedFromPlugin(struct EventStruct *event, uint8_t sampleSetCount)
   packed += LoRa_addInt(event->idx, PackedData_uint16);
   packed += LoRa_addInt(sampleSetCount, PackedData_uint8);
   packed += LoRa_addInt(value_count, PackedData_uint8);
+  if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+    String log = F("packed header: ");
+    log += packed;
+    if (raw_packed.length() > 0) {
+      log += F(" RAW: ");
+      log += raw_packed;
+    }
+    addLog(LOG_LEVEL_INFO, log);
+  }
 
   if (raw_packed.length() > 0) {
     packed += raw_packed;
@@ -40,7 +49,7 @@ String getPackedFromPlugin(struct EventStruct *event, uint8_t sampleSetCount)
 
         for (byte i = 0; i < value_count && i < VARS_PER_TASK; ++i) {
           // For now, just store the floats as an int32 by multiplying the value with 10000.
-          packed += LoRa_addFloat(value_count, PackedData_int32_1e4);
+          packed += LoRa_addFloat(UserVar[BaseVarIndex + i], PackedData_int32_1e4);
         }
         break;
     }
@@ -87,15 +96,15 @@ float getLoRaAirTime(uint8_t pl, uint8_t sf, uint16_t bw, uint8_t cr, uint8_t n_
     if (crc) { beta_offset += 16; }
 
     if (!header) { beta_offset -= 20; }
-    float beta_f                  = 8 * pl - 4 * sf + beta_offset;
+    float beta_f                  = 8.0f * pl - 4.0f * sf + beta_offset;
     bool  lowDataRateOptimization = (bw == 125 && sf >= 11);
 
     if (lowDataRateOptimization) {
-      beta_f = beta_f / (4 * (sf - 2));
+      beta_f = beta_f / (4.0f * (sf - 2));
     } else {
-      beta_f = beta_f / (4 * sf);
+      beta_f = beta_f / (4.0f * sf);
     }
-    int beta = static_cast<int>(beta_f + 1.0); // ceil
+    int beta = static_cast<int>(beta_f + 1.0f); // ceil
 
     if (beta > 0) {
       payload_length += (beta * (cr + 4));
@@ -104,7 +113,7 @@ float getLoRaAirTime(uint8_t pl, uint8_t sf, uint16_t bw, uint8_t cr, uint8_t n_
 
   // t_symbol and t_air in msec
   float t_symbol = (1 << sf) / bw;
-  float t_air    = ((n_preamble + 4.25) + payload_length) * t_symbol;
+  float t_air    = ((n_preamble + 4.25f) + payload_length) * t_symbol;
   return t_air;
 }
 

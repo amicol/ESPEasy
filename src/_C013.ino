@@ -1,3 +1,4 @@
+#include "_CPlugin_Helper.h"
 #ifdef USES_C013
 
 #include "src/Globals/Nodes.h"
@@ -37,13 +38,13 @@ struct C013_SensorDataStruct
 };
 
 
-bool CPlugin_013(byte function, struct EventStruct *event, String& string)
+bool CPlugin_013(CPlugin::Function function, struct EventStruct *event, String& string)
 {
   bool success = false;
 
   switch (function)
   {
-    case CPLUGIN_PROTOCOL_ADD:
+    case CPlugin::Function::CPLUGIN_PROTOCOL_ADD:
     {
       Protocol[++protocolCount].Number     = CPLUGIN_ID_013;
       Protocol[protocolCount].usesMQTT     = false;
@@ -56,51 +57,55 @@ bool CPlugin_013(byte function, struct EventStruct *event, String& string)
       break;
     }
 
-    case CPLUGIN_GET_DEVICENAME:
+    case CPlugin::Function::CPLUGIN_GET_DEVICENAME:
     {
       string = F(CPLUGIN_NAME_013);
       break;
     }
 
-    case CPLUGIN_PROTOCOL_TEMPLATE:
+    case CPlugin::Function::CPLUGIN_PROTOCOL_TEMPLATE:
     {
       event->String1 = "";
       event->String2 = "";
       break;
     }
 
-    case CPLUGIN_INIT:
+    case CPlugin::Function::CPLUGIN_INIT:
     {
       // C013_portUDP.begin(Settings.UDPPort);
       break;
     }
 
-    case CPLUGIN_TASK_CHANGE_NOTIFICATION:
+    case CPlugin::Function::CPLUGIN_TASK_CHANGE_NOTIFICATION:
     {
       C013_SendUDPTaskInfo(0, event->TaskIndex, event->TaskIndex);
       break;
     }
 
-    case CPLUGIN_PROTOCOL_SEND:
+    case CPlugin::Function::CPLUGIN_PROTOCOL_SEND:
     {
       C013_SendUDPTaskData(0, event->TaskIndex, event->TaskIndex);
       break;
     }
 
-    case CPLUGIN_UDP_IN:
+    case CPlugin::Function::CPLUGIN_UDP_IN:
     {
       C013_Receive(event);
       break;
     }
 
       /*
-          case CPLUGIN_FLUSH:
+          case CPlugin::Function::CPLUGIN_FLUSH:
             {
-              process_c013_delay_queue();
+              process_c013_delay_queue(event->ControllerIndex);
               delay(0);
               break;
             }
        */
+
+    default:
+      break;
+
   }
   return success;
 }
@@ -110,7 +115,7 @@ bool CPlugin_013(byte function, struct EventStruct *event, String& string)
 // ********************************************************************************
 void C013_SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskIndex)
 {
-  if (!WiFiConnected(10)) {
+  if (!NetworkConnected(10)) {
     return;
   }
 
@@ -119,7 +124,7 @@ void C013_SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskInde
   }
   pluginID_t pluginID = Settings.TaskDeviceNumber[sourceTaskIndex];
 
-  if (!validPluginID(pluginID)) {
+  if (!validPluginID_fullcheck(pluginID)) {
     return;
   }
 
@@ -154,7 +159,7 @@ void C013_SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskInde
 
 void C013_SendUDPTaskData(byte destUnit, byte sourceTaskIndex, byte destTaskIndex)
 {
-  if (!WiFiConnected(10)) {
+  if (!NetworkConnected(10)) {
     return;
   }
   struct C013_SensorDataStruct dataReply;
@@ -192,7 +197,7 @@ void C013_SendUDPTaskData(byte destUnit, byte sourceTaskIndex, byte destTaskInde
 \*********************************************************************************************/
 void C013_sendUDP(byte unit, byte *data, byte size)
 {
-  if (!WiFiConnected(10)) {
+  if (!NetworkConnected(10)) {
     return;
   }
   NodesMap::iterator it;
@@ -276,14 +281,14 @@ void C013_Receive(struct EventStruct *event) {
         // to prevent flash wear out (bugs in communication?) we can only write to an empty task
         // so it will write only once and has to be cleared manually through webgui
         // Also check the receiving end does support the plugin ID.
-        if (!validPluginID(Settings.TaskDeviceNumber[infoReply.destTaskIndex]) &&
+        if (!validPluginID_fullcheck(Settings.TaskDeviceNumber[infoReply.destTaskIndex]) &&
             supportedPluginID(infoReply.deviceNumber))
         {
           taskClear(infoReply.destTaskIndex, false);
           Settings.TaskDeviceNumber[infoReply.destTaskIndex]   = infoReply.deviceNumber;
           Settings.TaskDeviceDataFeed[infoReply.destTaskIndex] = infoReply.sourcelUnit; // remote feed store unit nr sending the data
 
-          for (byte x = 0; x < CONTROLLER_MAX; x++) {
+          for (controllerIndex_t x = 0; x < CONTROLLER_MAX; x++) {
             Settings.TaskDeviceSendData[x][infoReply.destTaskIndex] = false;
           }
           strcpy(ExtraTaskSettings.TaskDeviceName, infoReply.taskName);

@@ -5,13 +5,13 @@
  #include "../../ESPEasy_common.h"
  #include "../../ESPEasy_fdwdecl.h"
  #include "../DataStructs/ESPEasy_EventStruct.h"
- #include "../DataStructs/SettingsType.h"
  */
+
+#include "../DataStructs/SettingsType.h"
 
 #include <map>
 #include <stdint.h>
 
-#include "../../ESPEasy_common.h"
 #include "../Commands/Common.h"
 #include "../Globals/Settings.h"
 #include "../Globals/SecuritySettings.h"
@@ -22,7 +22,10 @@
 #include "../Globals/GlobalMapPortStatus.h"
 #include "../../ESPEasy_Log.h"
 #include "../Globals/Statistics.h"
-
+#include "../Helpers/ESPEasy_Storage.h"
+#include "../Helpers/ESPEasy_time_calc.h"
+#include "../Helpers/StringConverter.h"
+#include "../Helpers/Convert.h"
 
 #include "../../ESPEasy_fdwdecl.h"
 
@@ -31,6 +34,7 @@
 bool showSettingsFileLayout = false;
 #endif // ifndef BUILD_MINIMAL_OTA
 
+#ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
 String Command_Lowmem(struct EventStruct *event, const char *Line)
 {
   String result;
@@ -80,7 +84,7 @@ String Command_MemInfo(struct EventStruct *event, const char *Line)
   serialPrint(F("ExtraTaskSettingsStruct| "));
   serialPrintln(String(sizeof(ExtraTaskSettings)));
   serialPrint(F("DeviceStruct           | "));
-  serialPrintln(String(sizeof(Device)));
+  serialPrintln(String(Device.size()));
   return return_see_serial(event);
 }
 
@@ -88,21 +92,20 @@ String Command_MemInfo_detail(struct EventStruct *event, const char *Line)
 {
 #ifndef BUILD_MINIMAL_OTA
   showSettingsFileLayout = true;
-#endif // ifndef BUILD_MINIMAL_OTA
   Command_MemInfo(event, Line);
 
-  for (int st = 0; st < SettingsType_MAX; ++st) {
-    SettingsType settingsType = static_cast<SettingsType>(st);
+  for (int st = 0; st < SettingsType::SettingsType_MAX; ++st) {
+    SettingsType::SettingsType::Enum settingsType = static_cast<SettingsType::Enum>(st);
     int max_index, offset, max_size;
     int struct_size = 0;
     serialPrintln();
-    serialPrint(getSettingsTypeString(settingsType));
+    serialPrint(SettingsType::getSettingsTypeString(settingsType));
     serialPrintln(F(" | start | end | max_size | struct_size"));
     serialPrintln(F("--- | --- | --- | --- | ---"));
-    getSettingsParameters(settingsType, 0, max_index, offset, max_size, struct_size);
+    SettingsType::getSettingsParameters(settingsType, 0, max_index, offset, max_size, struct_size);
 
     for (int i = 0; i < max_index; ++i) {
-      getSettingsParameters(settingsType, i, offset, max_size);
+      SettingsType::getSettingsParameters(settingsType, i, offset, max_size);
       serialPrint(String(i));
       serialPrint("|");
       serialPrint(String(offset));
@@ -115,6 +118,9 @@ String Command_MemInfo_detail(struct EventStruct *event, const char *Line)
     }
   }
   return return_see_serial(event);
+  #else
+  return return_command_failed();
+  #endif // ifndef BUILD_MINIMAL_OTA
 }
 
 String Command_Background(struct EventStruct *event, const char *Line)
@@ -129,6 +135,7 @@ String Command_Background(struct EventStruct *event, const char *Line)
   serialPrintln(F("end"));
   return return_see_serial(event);
 }
+#endif // BUILD_NO_DIAGNOSTIC_COMMANDS
 
 String Command_Debug(struct EventStruct *event, const char *Line)
 {
@@ -149,6 +156,7 @@ String Command_logentry(struct EventStruct *event, const char *Line)
   return return_command_success();
 }
 
+#ifndef BUILD_NO_DIAGNOSTIC_COMMANDS
 String Command_JSONPortStatus(struct EventStruct *event, const char *Line)
 {
   addLog(LOG_LEVEL_INFO, F("JSON Port Status: Command not implemented yet."));
@@ -156,7 +164,7 @@ String Command_JSONPortStatus(struct EventStruct *event, const char *Line)
 }
 
 void createLogPortStatus(std::map<uint32_t, portStatusStruct>::iterator it)
-{
+{  
   String log = F("PortStatus detail: ");
 
   log += F("Port=");
@@ -204,3 +212,4 @@ String Command_logPortStatus(struct EventStruct *event, const char *Line)
   logPortStatus("Rules");
   return return_command_success();
 }
+#endif // BUILD_NO_DIAGNOSTIC_COMMANDS
