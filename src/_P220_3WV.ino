@@ -17,8 +17,8 @@
 #define INTERVAL_REG 45000      // Interval between 3VW temperature checks
 #define INTERVAL_MAIN_REG 900000        // Interval between Ambiant temperature checks
 
-#define main_PID_Kp 4  //main PID coeff
-#define main_PID_Ki 4
+#define main_PID_Kp 40  //main PID coeff
+#define main_PID_Ki 40
 #define main_PID_Kd 0
 #define way3_PID_Kp 1.9 //3 way valve PID coeff
 #define way3_PID_Ki 1
@@ -397,34 +397,38 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         log4+=step;
         addLog(LOG_LEVEL_INFO, log4);
 
-        	    target_3WV = ambient_temp;
-        			//main_input = ambient_temp;
-        			//main_PID = new PID (&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, DIRECT);
+        byte TaskIndex = PCONFIG(6);
+        byte BaseVarIndex = TaskIndex * VARS_PER_TASK + PCONFIG(7);
+        target = UserVar[BaseVarIndex];
 
-        			Output = 0;
-        			//input = input_temp;
-        			//way3_PID = new PID (&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
+        target_3WV = target;
+        //main_input = ambient_temp;
+        //main_PID = new PID (&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, DIRECT);
 
-        			//turn the PID on
-        	 		way3_PID.SetMode(AUTOMATIC);
-        			main_PID.SetMode(AUTOMATIC);
+        Output = 0;
+        //input = input_temp;
+        //way3_PID = new PID (&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
 
-        			way3_PID.SetOutputLimits(0, MAX_3WAY);
-        			main_PID.SetOutputLimits(15., PCONFIG_FLOAT(1));
+        //turn the PID on
+        way3_PID.SetMode(AUTOMATIC);
+        main_PID.SetMode(AUTOMATIC);
 
-              //stopServoAt = millis() + TIME_TO_RESET;
-              digitalWrite(CONFIG_PIN3,LOW);
-              digitalWrite(CONFIG_PIN2, HIGH);
-              circulatorOn(event);
-              stopServoAt = millis() + PCONFIG_FLOAT(0)*1000;
-              //digitalWrite(CONFIG_PIN2,LOW);
-              String log3 = F("Stop servo at ");
-              log3+=stopServoAt;
-              addLog(LOG_LEVEL_INFO, log3);
-              servoPosition = 0;
-              String log2 = F("Init 3WV End ");
-              addLog(LOG_LEVEL_INFO, log2);
-              adjust_PID(event);
+        way3_PID.SetOutputLimits(0, MAX_3WAY);
+        main_PID.SetOutputLimits(15., PCONFIG_FLOAT(1));
+
+        //stopServoAt = millis() + TIME_TO_RESET;
+        digitalWrite(CONFIG_PIN3,LOW);
+        digitalWrite(CONFIG_PIN2, HIGH);
+        circulatorOn(event);
+        stopServoAt = millis() + PCONFIG_FLOAT(0)*1000;
+        //digitalWrite(CONFIG_PIN2,LOW);
+        String log3 = F("Stop servo at ");
+        log3+=stopServoAt;
+        addLog(LOG_LEVEL_INFO, log3);
+        servoPosition = 0;
+        String log2 = F("Init 3WV End ");
+        addLog(LOG_LEVEL_INFO, log2);
+        adjust_PID(event);
 
         success = true;
         break;
@@ -435,13 +439,8 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         // we're checking a var from another task, so calculate that basevar
         byte TaskIndex = PCONFIG(0);
         byte BaseVarIndex = TaskIndex * VARS_PER_TASK + PCONFIG(1);
-        if (ambient_temp != UserVar[BaseVarIndex]){
-          ambient_temp = UserVar[BaseVarIndex];
-          adjust_PID(event);
-          regulate(event);
-        }
+        ambient_temp = UserVar[BaseVarIndex];
         
-
         byte TaskIndex2 = PCONFIG(2);
         byte BaseVarIndex2 = TaskIndex2 * VARS_PER_TASK + PCONFIG(3);
         input_temp = UserVar[BaseVarIndex2];
@@ -458,6 +457,8 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
               addLog(LOG_LEVEL_INFO, log3);
 
           target = UserVar[BaseVarIndex3];
+          adjust_PID(event);
+          regulate(event);
         }
         if (target==0)
           {
