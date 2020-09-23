@@ -416,6 +416,7 @@ To create/register a plugin, you have to :
 
     #define PLUGIN_SET_ONLY_SWITCH
     #define PLUGIN_SET_ONLY_TEMP_HUM
+    #define USES_P021
 #endif
 
 #ifdef PLUGIN_SET_SONOFF_POW
@@ -438,6 +439,7 @@ To create/register a plugin, you have to :
 #ifdef PLUGIN_SET_SONOFF_4CH
     #define PLUGIN_DESCR  "Sonoff 4CH"
     #define PLUGIN_SET_ONLY_SWITCH
+    #define USES_P220
 #endif
 
 #ifdef PLUGIN_SET_SONOFF_TOUCH
