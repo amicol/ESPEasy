@@ -273,6 +273,7 @@ To create/register a plugin, you have to :
 
 
 // Strip out parts not needed for either MINIMAL_OTA and MEMORY_ANALYSIS
+/*
 #if defined(BUILD_MINIMAL_OTA) || defined(MEMORY_ANALYSIS)
     #ifndef WEBSERVER_CUSTOM_BUILD_DEFINED
         #ifdef WEBSERVER_TIMINGSTATS
@@ -307,7 +308,7 @@ To create/register a plugin, you have to :
         #endif
     #endif // WEBSERVER_CUSTOM_BUILD_DEFINED
 #endif
-
+*/
 
 
 #ifdef BUILD_NO_DEBUG
@@ -399,7 +400,7 @@ To create/register a plugin, you have to :
     #define PLUGIN_DESCR  "Sonoff 4CH"
     #define PLUGIN_SET_ONLY_SWITCH
     #define PLUGIN_SET_ONLY_TEMP_HUM
-    #define USES_P021
+    //#define USES_P021
     #define USES_P220
   //  #define USES_P221
 #endif
