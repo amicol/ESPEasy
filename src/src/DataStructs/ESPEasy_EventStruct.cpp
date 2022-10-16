@@ -1,23 +1,40 @@
 #include "../DataStructs/ESPEasy_EventStruct.h"
 
-#include "../DataStructs/ESPEasyLimits.h"
+#include "../CustomBuild/ESPEasyLimits.h"
+#include "../DataTypes/EventValueSource.h"
+#include "../Globals/Plugins.h"
+#include "../Globals/CPlugins.h"
+#include "../Globals/NPlugins.h"
 
-EventStruct::EventStruct() :
-  Data(nullptr), idx(0), Par1(0), Par2(0), Par3(0), Par4(0), Par5(0),
-  Source(0), TaskIndex(INVALID_TASK_INDEX), ControllerIndex(0), ProtocolIndex(0), NotificationIndex(0),
-  BaseVarIndex(0), sensorType(0), OriginTaskIndex(0) {}
+#include "../../_Plugin_Helper.h"
 
-EventStruct::EventStruct(const struct EventStruct& event) :
-  String1(event.String1)
-  , String2(event.String2)
-  , String3(event.String3)
-  , String4(event.String4)
-  , String5(event.String5)
-  , Data(event.Data)
-  , idx(event.idx)
-  , Par1(event.Par1), Par2(event.Par2), Par3(event.Par3), Par4(event.Par4), Par5(event.Par5)
-  , Source(event.Source), TaskIndex(event.TaskIndex), ControllerIndex(event.ControllerIndex)
-  , ProtocolIndex(event.ProtocolIndex), NotificationIndex(event.NotificationIndex)
-  , BaseVarIndex(event.BaseVarIndex), sensorType(event.sensorType)
-  , OriginTaskIndex(event.OriginTaskIndex)
+EventStruct::EventStruct(taskIndex_t taskIndex) :
+  TaskIndex(taskIndex), BaseVarIndex(taskIndex * VARS_PER_TASK) 
 {}
+
+void EventStruct::deep_copy(const struct EventStruct& other) {
+  this->operator=(other);
+}
+
+void EventStruct::deep_copy(const struct EventStruct* other) {
+  if (other != nullptr) {
+    deep_copy(*other);
+  }
+}
+
+void EventStruct::setTaskIndex(taskIndex_t taskIndex) {
+  TaskIndex    = taskIndex;
+  BaseVarIndex = taskIndex * VARS_PER_TASK;
+  sensorType   = Sensor_VType::SENSOR_TYPE_NOT_SET;
+}
+
+void EventStruct::clear() {
+  *this = EventStruct();
+}
+
+Sensor_VType EventStruct::getSensorType() {
+  const int tmp_idx = idx;
+  checkDeviceVTypeForTask(this);
+  idx = tmp_idx;
+  return sensorType;
+}

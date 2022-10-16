@@ -65,7 +65,13 @@ IRsend irsend(kIrLed);  // Set the GPIO to be used to sending the message.
 void handleRoot() {
   server.send(200, "text/html",
               "<html>" \
-                "<head><title>" HOSTNAME " Demo</title></head>" \
+                "<head><title>" HOSTNAME " Demo </title>" \
+                "<meta http-equiv=\"Content-Type\" " \
+                    "content=\"text/html;charset=utf-8\">" \
+                "<meta name=\"viewport\" content=\"width=device-width," \
+                    "initial-scale=1.0,minimum-scale=1.0," \
+                    "maximum-scale=5.0\">" \
+                "</head>" \
                 "<body>" \
                   "<h1>Hello from " HOSTNAME ", you can send NEC encoded IR" \
                       "signals from here!</h1>" \
@@ -126,6 +132,8 @@ void setup(void) {
   if (mdns.begin(HOSTNAME)) {
 #endif  // ESP8266
     Serial.println("MDNS responder started");
+    // Announce http tcp service on port 80
+    mdns.addService("http", "tcp", 80);
   }
 
   server.on("/", handleRoot);
@@ -142,5 +150,8 @@ void setup(void) {
 }
 
 void loop(void) {
+#if defined(ESP8266)
+  mdns.update();
+#endif
   server.handleClient();
 }

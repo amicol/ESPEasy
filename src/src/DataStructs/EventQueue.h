@@ -3,23 +3,36 @@
 
 
 #include <list>
-#include "../../ESPEasy_common.h"
+
 
 #include "../Globals/Plugins.h"
 
 
 struct EventQueueStruct {
-  EventQueueStruct();
+  EventQueueStruct() = default;
 
-  void add(const String& event);
+  void        add(const String& event,
+                  bool          deduplicate = false);
 
-  bool getNext(String& event);
+  void        add(const __FlashStringHelper *event,
+                  bool                       deduplicate = false);
 
-  void clear();
+  void        addMove(String&& event,
+                      bool     deduplicate = false);
 
-  bool isEmpty() const;
+  bool        getNext(String& event);
+
+  void        clear();
+
+  bool        isEmpty() const;
+
+  std::size_t size() {
+    return _eventQueue.size();
+  }
 
 private:
+
+  bool isDuplicate(const String& event);
 
   std::list<String>_eventQueue;
 };

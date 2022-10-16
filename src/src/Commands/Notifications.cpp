@@ -1,30 +1,36 @@
 #include "../Commands/Notifications.h"
 
+#if FEATURE_NOTIFIER
+
 #include "../Commands/Common.h"
-#include "../../ESPEasy_fdwdecl.h"
+
 #include "../../ESPEasy_common.h"
+#include "../DataTypes/ESPEasy_plugin_functions.h"
+#include "../Globals/ESPEasy_Scheduler.h"
 #include "../Globals/Settings.h"
-#include "../../ESPEasy_plugindefs.h"
+#include "../Globals/NPlugins.h"
+#include "../Helpers/StringConverter.h"
 
 
-String Command_Notifications_Notify(struct EventStruct *event, const char* Line)
+const __FlashStringHelper * Command_Notifications_Notify(struct EventStruct *event, const char* Line)
 {
-	String message = "";
+	String message;
 	GetArgv(Line, message, 3);
 
 	if (event->Par1 > 0) {
 		int index = event->Par1 - 1;
 		if (Settings.NotificationEnabled[index] && Settings.Notification[index] != 0) {
-			byte NotificationProtocolIndex = getNotificationProtocolIndex(Settings.Notification[index]);
-			if (NotificationProtocolIndex != NPLUGIN_NOT_FOUND) {
-				struct EventStruct TempEvent;
+			nprotocolIndex_t NotificationProtocolIndex = getNProtocolIndex(Settings.Notification[index]);
+			if (validNProtocolIndex(NotificationProtocolIndex )) {
+				struct EventStruct TempEvent(event->TaskIndex);
 				// TempEvent.NotificationProtocolIndex = NotificationProtocolIndex;
 				TempEvent.NotificationIndex = index;
-				TempEvent.TaskIndex = event->TaskIndex;
 				TempEvent.String1 = message;
-				schedule_notification_event_timer(NotificationProtocolIndex, NPLUGIN_NOTIFY, &TempEvent);
+				Scheduler.schedule_notification_event_timer(NotificationProtocolIndex, NPlugin::Function::NPLUGIN_NOTIFY, std::move(TempEvent));
 			}
 		}
 	}
 	return return_command_success();
 }
+
+#endif

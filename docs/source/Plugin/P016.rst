@@ -21,6 +21,8 @@ Maintainer: |P016_maintainer|
 
 Used libraries: |P016_usedlibraries|
 
+.. include:: P016_TSOP4838.rst
+
 Supported hardware
 ------------------
 
@@ -41,6 +43,18 @@ Change log
 
 .. versionchanged:: 2.0
   ...
+
+  2022-08-08:
+
+  |added|
+  The buffer used for receiving and processing the incoming data can now be manually configured.
+
+  2021-05-24:
+
+  |added|
+  Support for IR codes up to 64 bit with separated Decode type and Repeat option, existing settings are converted, reworked the settings UI to reflect those changes.
+
+  .
 
   |added|
   Major overhaul for 2.0 release.

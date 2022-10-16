@@ -1,77 +1,62 @@
+#include "_Plugin_Helper.h"
+
 // #######################################################################################################
 // #################################### Plugin 081: CRON tasks Scheduler       ###########################
 // #######################################################################################################
 
-// Maxim Integrated
+// -V::795
+
 #ifdef USES_P081
 
-#include <ctype.h>
-#include <time.h>
 
-extern "C"
+# include "src/PluginStructs/P081_data_struct.h"
+
+# define PLUGIN_081
+# define PLUGIN_ID_081      81                        // plugin id
+# define PLUGIN_NAME_081   "Generic - CRON" // "Plugin Name" is what will be displayed in the selection list
+# define PLUGIN_VALUENAME1_081 "LastExecution"
+# define PLUGIN_VALUENAME2_081 "NextExecution"
+
+
+boolean Plugin_081(uint8_t function, struct EventStruct *event, String& string)
 {
-#include "ccronexpr.h"
-}
-
-
-#define PLUGIN_081
-#define PLUGIN_ID_081      81                 //plugin id
-#define PLUGIN_NAME_081   "Generic - CRON [TESTING]" //"Plugin Name" is what will be displayed in the selection list
-#define PLUGIN_VALUENAME1_081 "LastExecution"
-#define PLUGIN_VALUENAME2_081 "NextExecution"
-#ifndef PLUGIN_081_DEBUG
-  #define PLUGIN_081_DEBUG  false                //set to true for extra log info in the debug
-#endif
-#define PLUGIN_081_EXPRESSION_SIZE 41
-#define LASTEXECUTION UserVar[event->BaseVarIndex]
-#define NEXTEXECUTION UserVar[event->BaseVarIndex+1]
-
-union timeToFloat
-{
-  time_t time;
-  float value;
-};
-
-
-//A plugin has to implement the following function
-
-boolean Plugin_081(byte function, struct EventStruct *event, String& string)
-{
-  timeToFloat converter;
   boolean success = false;
+
   switch (function)
   {
     case PLUGIN_DEVICE_ADD:
     {
-        //This case defines the device characteristics, edit appropriately
+      // This case defines the device characteristics, edit appropriately
 
-        Device[++deviceCount].Number = PLUGIN_ID_081;
-        Device[deviceCount].Type = DEVICE_TYPE_DUMMY;  //how the device is connected
-        Device[deviceCount].VType = SENSOR_TYPE_NONE; //type of value the plugin will return, used only for Domoticz
-        Device[deviceCount].Ports = 0;
-        Device[deviceCount].PullUpOption = false;
-        Device[deviceCount].InverseLogicOption = false;
-        Device[deviceCount].FormulaOption = false;
-        Device[deviceCount].ValueCount = 2;             //number of output variables. The value should match the number of keys PLUGIN_VALUENAME1_xxx
-        Device[deviceCount].SendDataOption = false;
-        Device[deviceCount].TimerOption = false;
-        Device[deviceCount].TimerOptional = false;
-        Device[deviceCount].GlobalSyncOption = true;
-        Device[deviceCount].DecimalsOnly = true;
-        break;
+      Device[++deviceCount].Number           = PLUGIN_ID_081;
+      Device[deviceCount].Type               = DEVICE_TYPE_DUMMY;              // how the device is connected
+      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_NONE; // type of value the plugin will return, used only for
+                                                                               // Domoticz
+      Device[deviceCount].Ports              = 0;
+      Device[deviceCount].PullUpOption       = false;
+      Device[deviceCount].InverseLogicOption = false;
+      Device[deviceCount].FormulaOption      = false;
+      Device[deviceCount].ValueCount         = 2; // number of output variables. The value should match the number of keys
+                                                  // PLUGIN_VALUENAME1_xxx
+      Device[deviceCount].SendDataOption   = false;
+      Device[deviceCount].TimerOption      = false;
+      Device[deviceCount].TimerOptional    = false;
+      Device[deviceCount].GlobalSyncOption = true;
+      Device[deviceCount].DecimalsOnly     = true;
+      break;
     }
 
     case PLUGIN_GET_DEVICENAME:
     {
-      //return the device name
+      // return the device name
       string = F(PLUGIN_NAME_081);
       break;
     }
 
     case PLUGIN_GET_DEVICEVALUENAMES:
     {
-      //called when the user opens the module configuration page
-      //it allows to add a new row for each output variable of the plugin
+      // called when the user opens the module configuration page
+      // it allows to add a new row for each output variable of the plugin
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[0], PSTR(PLUGIN_VALUENAME1_081));
       strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_081));
       break;
@@ -79,13 +64,15 @@ boolean Plugin_081(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_LOAD:
     {
-      char expression[PLUGIN_081_EXPRESSION_SIZE];
-      LoadCustomTaskSettings(event->TaskIndex, (byte*)&expression, PLUGIN_081_EXPRESSION_SIZE);
-
+      addFormSubHeader(F("Schedule"));
       addFormTextBox(F("CRON Expression")
-        , F("p081_cron_exp")
-        , expression
-        , 39);
+                     , F("p081_cron_exp")
+                     , P081_getCronExpr(event->TaskIndex)
+                     , 39);
+
+      addFormNote(F("S  M  H  DoM  Month  DoW"));
+
+      P081_html_show_cron_expr(event);
 
       success = true;
       break;
@@ -93,251 +80,113 @@ boolean Plugin_081(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SAVE:
     {
+      String expression = webArg(F("p081_cron_exp"));
       String log;
-      char expression[PLUGIN_081_EXPRESSION_SIZE];
-      strncpy(expression,  WebServer.arg(F("p081_cron_exp")).c_str() , sizeof(expression));
-      if(/*strcmp(expression, state.Expression)*/1 != 0)
       {
-        cron_expr expr;
-        const char* err = NULL;
-        memset(&expr, 0, sizeof(expr));
-        cron_parse_expr(expression, &expr, &err);
-        if (!err)
-        {
-          unsigned long time __attribute__((unused)) = now();
-          time_t last   = mktime((struct tm *)&tm);
-          time_t next   = cron_next((cron_expr *)&expr, last);
-          converter.time = last;
-          LASTEXECUTION = converter.value; // Set current time;
-          converter.time = next;
-          NEXTEXECUTION = converter.value;
-
-#if PLUGIN_081_DEBUG
-          serialPrintln(last);
-          converter.value = LASTEXECUTION;
-          serialPrintln(converter.time);
-          serialPrintln(getDateTimeString(*gmtime(&last)));
-          serialPrintln(next);
-          converter.value = NEXTEXECUTION;
-          serialPrintln(converter.time);
-          serialPrintln(getDateTimeString(*gmtime(&next)));
-          PrintCronExp(expr);
-#endif
-        }
-        else
-        {
-          log = String(F("CRON Expression: Error ")) + String(err);
-          addHtmlError(log);
-          addLog(LOG_LEVEL_ERROR, log);
-        }
-        log = SaveCustomTaskSettings(event->TaskIndex, (byte*)&expression, PLUGIN_081_EXPRESSION_SIZE);
-        if(log != "")
-        {
-            log = String(PSTR(PLUGIN_NAME_081)) + String(F(": Saving ")) + log;
-            addLog(LOG_LEVEL_ERROR, log);
-        }
+        char expression_c[PLUGIN_081_EXPRESSION_SIZE];
+        ZERO_FILL(expression_c);
+        safe_strncpy(expression_c, expression, PLUGIN_081_EXPRESSION_SIZE);
+        log = SaveCustomTaskSettings(event->TaskIndex, reinterpret_cast<const uint8_t *>(&expression_c), PLUGIN_081_EXPRESSION_SIZE);
       }
+
+      if (log.length() > 0)
+      {
+        addLog(LOG_LEVEL_ERROR, String(PSTR(PLUGIN_NAME_081)) + F(": Saving ") + log);
+      }
+
+      clearPluginTaskData(event->TaskIndex);
+      P081_setCronExecTimes(event, CRON_INVALID_INSTANT, CRON_INVALID_INSTANT);
       success = true;
       break;
-
     }
-    case PLUGIN_WEBFORM_SHOW_VALUES:
+
+    case PLUGIN_FORMAT_USERVAR:
     {
-      converter.value = LASTEXECUTION;
-      time_t last = converter.time;
-      converter.value = NEXTEXECUTION;
-      time_t next = converter.time;
-      addHtml(F("<div class=\"div_l\">"));
-      addHtml(ExtraTaskSettings.TaskDeviceValueNames[0]);
-      addHtml(F(":</div><div class=\"div_r\">"));
-      addHtml(getDateTimeString(*gmtime(&last)));
-      addHtml(F("</div><div class=\"div_br\"></div><div class=\"div_l\">"));
-      addHtml(ExtraTaskSettings.TaskDeviceValueNames[1]);
-      addHtml(F(":</div><div class=\"div_r\">"));
-      addHtml(getDateTimeString(*gmtime(&next)));
-      addHtml(F("</div>"));
-      success = true;
+      switch (event->idx) {
+        case 0:
+          string = P081_formatExecTime(event->TaskIndex, LASTEXECUTION);
+          break;
+        case 1:
+          string = P081_formatExecTime(event->TaskIndex, NEXTEXECUTION);
+          break;
+      }
+      success = string.length() > 0;
       break;
     }
 
     case PLUGIN_INIT:
     {
-      //this case defines code to be executed when the plugin is initialised
-      //after the plugin has been initialised successfuly, set success and break
-      success = true;
+      initPluginTaskData(event->TaskIndex, new (std::nothrow) P081_data_struct(P081_getCronExpr(event->TaskIndex)));
+      P081_data_struct *P081_data =
+        static_cast<P081_data_struct *>(getPluginTaskData(event->TaskIndex));
+
+      if (nullptr == P081_data) {
+        return success;
+      }
+
+      if (P081_data->isInitialized()) {
+        P081_check_or_init(event);
+        success = true;
+      } else {
+        clearPluginTaskData(event->TaskIndex);
+      }
       break;
     }
+
 
     case PLUGIN_READ:
     {
+      // Need to return true here, so the last and next exec times are stored in RTC.
       success = true;
       break;
-    }
-
-    case PLUGIN_WRITE:
-    {
-       break;
-    }
-
-    case PLUGIN_EXIT:
-    {
-      //perform cleanup tasks here. For example, free memory
-
-      break;
-
     }
 
     case PLUGIN_TIME_CHANGE:
     case PLUGIN_ONCE_A_SECOND:
     {
-      //code to be executed once a second. Tasks which do not require fast response can be added here
-      String log;
-      char expression[PLUGIN_081_EXPRESSION_SIZE];
-      LoadCustomTaskSettings(event->TaskIndex, (byte*)&expression, PLUGIN_081_EXPRESSION_SIZE);
-      converter.value = LASTEXECUTION;
-      time_t last = converter.time;
-      converter.value = NEXTEXECUTION;
-      time_t next = converter.time;
-      unsigned long time __attribute__((unused)) = now();
-      struct tm current = tm;
-      time_t  current_t = mktime((struct tm *)&current);
-      #if PLUGIN_081_DEBUG
-        serialPrintln(F("CRON Debug info:"));
-        serialPrint(F("Next execution:"));
-        serialPrintln(getDateTimeString(*gmtime(&next)));
-        serialPrint(F("Current Time:"));
-        serialPrintln(getDateTimeString(current));
-        serialPrint(F("Triggered:"));
-        serialPrintln(next <=  current_t);
-      #endif
-      if(function == PLUGIN_TIME_CHANGE || next <=  current_t)
-      {
-        cron_expr expr;
-        memset(&expr, 0, sizeof(expr));
-        const char* error;
-        addLog(LOG_LEVEL_DEBUG, F("Cron Elapsed"));
-        cron_parse_expr(expression, &expr, &error);
+      // code to be executed once a second. Tasks which do not require fast response can be added here
+      if (node_time.systemTimePresent()) {
+        P081_check_or_init(event);
+        time_t next_exec_time = P081_getCronExecTime(event->TaskIndex, NEXTEXECUTION);
 
-#if PLUGIN_081_DEBUG
-        PrintCronExp(expr);
-        serialPrint(F("Expression:"));
-        serialPrintln(expression);
-#endif
-        if(error)
-        {
-          //TODO: Notify at ui de error
-#if PLUGIN_081_DEBUG
-          serialPrint(F("Errors:"));
-          serialPrintln(String(error));
-#endif
-          addLog(LOG_LEVEL_ERROR, String(F("CRON Expression:")) + String(error));
-        }
-        else
-        {
-          last = current_t; // Set current time;
-          next = cron_next((cron_expr *)&expr, last);
-          if(next != CRON_INVALID_INSTANT)
-          {
-#if PLUGIN_081_DEBUG
-            serialPrint(F("LastExecution:"));
-            serialPrintln(getDateTimeString(*gmtime(&last)));
-            serialPrint(F("NextExecution:"));
-            serialPrintln(getDateTimeString(*gmtime(&next)));
-#endif
+        if (next_exec_time != CRON_INVALID_INSTANT) {
+          const time_t current_time = P081_getCurrentTime();
+          const bool   cron_elapsed = (next_exec_time <= current_time);
 
-            converter.time = last;
-            LASTEXECUTION = converter.value;
-            converter.time = next;
-            NEXTEXECUTION = converter.value;
-#if PLUGIN_081_DEBUG
-            serialPrintln(F("Check Conversion"));
-            serialPrintln(last);
-            converter.value = LASTEXECUTION;
-            serialPrintln(converter.time);
-            serialPrintln(next);
-            converter.value = NEXTEXECUTION;
-            serialPrintln(converter.time);
-#endif
-            addLog(LOG_LEVEL_DEBUG, String(F("Next execution:")) + getDateTimeString(*gmtime(&next)));
-            LoadTaskSettings(event->TaskIndex);
-            if(function != PLUGIN_TIME_CHANGE) {
-              eventQueue.add(String(F("Cron#")) + String(ExtraTaskSettings.TaskDeviceName));
+          if (cron_elapsed) {
+            # ifndef BUILD_NO_DEBUG
+            addLog(LOG_LEVEL_DEBUG, F("Cron Elapsed"));
+            # endif // ifndef BUILD_NO_DEBUG
+
+            time_t last_exec_time = next_exec_time;
+            next_exec_time = P081_computeNextCronTime(event->TaskIndex, current_time);
+            P081_setCronExecTimes(event, last_exec_time, next_exec_time);
+
+            # ifndef BUILD_NO_DEBUG
+            addLog(LOG_LEVEL_DEBUG, String(F("Next execution:")) + formatDateTimeString(*gmtime(&next_exec_time)));
+            # endif // ifndef BUILD_NO_DEBUG
+
+            if (function != PLUGIN_TIME_CHANGE) {
+              if (Settings.UseRules) {
+                eventQueue.add(String(F("Cron#")) + getTaskDeviceName(event->TaskIndex));
+              }
+              success = true;
             }
           }
-          else
-          {
-            log = String(F("CRON: INVALID INSTANT"));
-            addLog(LOG_LEVEL_ERROR, log);
-          }
+        } else {
+          addLog(LOG_LEVEL_ERROR, F("CRON: INVALID INSTANT"));
         }
-
+      } else {
+        addLog(LOG_LEVEL_ERROR, F("CRON: Time not synced"));
       }
-      success = true;
-	  break;
-    }
 
-    case PLUGIN_TEN_PER_SECOND:
-    {
-      //code to be executed 10 times per second. Tasks which require fast response can be added here
-      //be careful on what is added here. Heavy processing will result in slowing the module down!
 
-      success = true;
-	  break;
+      break;
     }
-  }   // switch
+  } // switch
+
   return success;
-
-}     //function
-
-#if PLUGIN_081_DEBUG
-void PrintCronExp(struct cron_expr_t e) {
-  serialPrintln(F("===DUMP Cron Expression==="));
-  serialPrint(F("Seconds:"));
-  for (int i = 0; i < 8; i++)
-  {
-    serialPrint(e.seconds[i]);
-    serialPrint(",");
-  }
-  serialPrintln();
-  serialPrint(F("Minutes:"));
-  for (int i = 0; i < 8; i++)
-  {
-    serialPrint(e.minutes[i]);
-    serialPrint(",");
-  }
-  serialPrintln();
-  serialPrint(F("hours:"));
-  for (int i = 0; i < 3; i++)
-  {
-    serialPrint(e.hours[i]);
-    serialPrint(",");
-  }
-  serialPrintln();
-  serialPrint(F("months:"));
-  for (int i = 0; i < 2; i++)
-  {
-    serialPrint(e.months[i]);
-    serialPrint(",");
-  }
-  serialPrintln();
-  serialPrint(F("days_of_week:"));
-  for (int i = 0; i < 1; i++)
-  {
-    serialPrint(e.days_of_week[i]);
-    serialPrint(",");
-  }
-  serialPrintln();
-  serialPrint(F("days_of_month:"));
-  for (int i = 0; i < 4; i++)
-  {
-    serialPrint(e.days_of_month[i]);
-    serialPrint(",");
-  }
-  serialPrintln();
-  serialPrintln(F("END=DUMP Cron Expression==="));
-
-}
-#endif
+}   // function
 
 
 #endif // USES_P081

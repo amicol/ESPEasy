@@ -42,10 +42,10 @@ Specifications (indoor unit):
    of the normal builds. If you want to compile ESP Easy with this plugin enabled you
    can set the following line in your platformio.ini:
 
-   .. code-block:: html
+   .. code-block:: none
 
        [platformio]
-       env_default = hard_Ventus_W266
+       env_default = hard_Ventus_W266_1M
 
 The plugin can only **read** the sensors of the outdoor unit.
 
@@ -70,7 +70,7 @@ Wiring
 
 .. image:: P046_Ventus_W266_2.jpg
 
-.. code-block:: html
+.. code-block:: none
 
     ESP               Ventus
     GPIO (4)   <-->   MOSI
@@ -169,7 +169,7 @@ Indicators (recommended settings)
 Rules examples
 --------------
 
-.. code-block:: html
+.. code-block:: none
 
  on VentusW266#UV do
   if [VentusW266#UV]>9

@@ -1,3 +1,4 @@
+#include "_Plugin_Helper.h"
 #ifdef USES_P056
 //#######################################################################################################
 //#################################### Plugin 056: Dust Sensor SDS011 / SDS018 ##########################
@@ -9,7 +10,7 @@
   This plugin reads the particle concentration from SDS011 Sensor
   DevicePin1 - RX on ESP, TX on SDS
 */
-#ifdef ESP8266  // Needed for precompile issues.
+//#ifdef ESP8266  // Needed for precompile issues.
 
 #define PLUGIN_056
 #define PLUGIN_ID_056         56
@@ -18,12 +19,13 @@
 #define PLUGIN_VALUENAME2_056 "PM10"    // Dust <10µm in µg/m³
 
 #include <jkSDS011.h>
+#include "ESPEasy-Globals.h"
 
 
-CjkSDS011 *Plugin_056_SDS = NULL;
+CjkSDS011 *Plugin_056_SDS = nullptr;
 
 
-boolean Plugin_056(byte function, struct EventStruct *event, String& string)
+boolean Plugin_056(uint8_t function, struct EventStruct *event, String& string)
 {
   bool success = false;
 
@@ -33,8 +35,8 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
     case PLUGIN_DEVICE_ADD:
       {
         Device[++deviceCount].Number = PLUGIN_ID_056;
-        Device[deviceCount].Type = DEVICE_TYPE_DUAL;
-        Device[deviceCount].VType = SENSOR_TYPE_DUAL;
+        Device[deviceCount].Type = DEVICE_TYPE_SERIAL;
+        Device[deviceCount].VType = Sensor_VType::SENSOR_TYPE_DUAL;
         Device[deviceCount].Ports = 0;
         Device[deviceCount].PullUpOption = false;
         Device[deviceCount].InverseLogicOption = false;
@@ -44,6 +46,7 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
         Device[deviceCount].TimerOption = true;
         Device[deviceCount].TimerOptional = false;
         Device[deviceCount].GlobalSyncOption = true;
+        Device[deviceCount].PluginStats        = true;
         break;
       }
 
@@ -75,7 +78,6 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_LOAD:
       {
-        serialHelper_webformLoad(event);
 
         // FIXME TD-er:  Whether TX pin is connected should be set somewhere
         if (Plugin_056_hasTxPin(event)) {
@@ -89,7 +91,6 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
       }
       case PLUGIN_WEBFORM_SAVE:
         {
-          serialHelper_webformSave(event);
 
           if (Plugin_056_hasTxPin(event)) {
             // Communications to device should work.
@@ -105,16 +106,19 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
       {
-        if (Plugin_056_SDS)
+        if (Plugin_056_SDS) {
           delete Plugin_056_SDS;
+        }
+
         const int16_t serial_rx = CONFIG_PIN1;
         const int16_t serial_tx = CONFIG_PIN2;
-        Plugin_056_SDS = new CjkSDS011(serial_rx, serial_tx);
+        const ESPEasySerialPort port = static_cast<ESPEasySerialPort>(CONFIG_PORT);
+        Plugin_056_SDS = new (std::nothrow) CjkSDS011(port, serial_rx, serial_tx);
         String log = F("SDS  : Init OK  ESP GPIO-pin RX:");
         log += serial_rx;
         log += F(" TX:");
         log += serial_tx;
-        addLog(LOG_LEVEL_INFO, log);
+        addLogMove(LOG_LEVEL_INFO, log);
 
         success = true;
         break;
@@ -123,6 +127,7 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
     case PLUGIN_EXIT:
       {
         // //FIXME: if this plugin is used more than once at the same time, things go horribly wrong :)
+        // FIXME TD-er: Must implement plugin_data_struct for this
         //
         // if (Plugin_056_SDS)
         //   delete Plugin_056_SDS;
@@ -142,17 +147,21 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
         {
           const float pm2_5 = Plugin_056_SDS->GetPM2_5();
           const float pm10 = Plugin_056_SDS->GetPM10_();
-          String log = F("SDS  : act ");
-          log += pm2_5;
-          log += ' ';
-          log += pm10;
-          addLog(LOG_LEVEL_DEBUG, log);
+          #ifndef BUILD_NO_DEBUG
+          if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+            String log = F("SDS  : act ");
+            log += pm2_5;
+            log += ' ';
+            log += pm10;
+            addLogMove(LOG_LEVEL_DEBUG, log);
+          }
+          #endif
 
           if (Settings.TaskDeviceTimer[event->TaskIndex] == 0)
           {
             UserVar[event->BaseVarIndex + 0] = pm2_5;
             UserVar[event->BaseVarIndex + 1] = pm10;
-            event->sensorType = SENSOR_TYPE_DUAL;
+            event->sensorType = Sensor_VType::SENSOR_TYPE_DUAL;
             sendData(event);
           }
         }
@@ -211,10 +220,12 @@ void Plugin_056_setWorkingPeriod(int minutes) {
   if (!Plugin_056_SDS)
     return;
   Plugin_056_SDS->SetWorkingPeriod(minutes);
-  String log = F("SDS  : Working Period set to: ");
-  log += Plugin_056_WorkingPeriodToString(minutes);
-  addLog(LOG_LEVEL_INFO, log);
+  if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+    String log = F("SDS  : Working Period set to: ");
+    log += Plugin_056_WorkingPeriodToString(minutes);
+    addLogMove(LOG_LEVEL_INFO, log);
+  }
 }
 
+//#endif
 #endif // USES_P056
-#endif

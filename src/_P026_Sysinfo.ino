@@ -1,10 +1,16 @@
+#include "_Plugin_Helper.h"
 #ifdef USES_P026
 //#######################################################################################################
 //#################################### Plugin 026: System Info ##########################################
 //#######################################################################################################
 
 
-#include "ESPEasy_packed_raw_data.h"
+#include "src/DataStructs/ESPEasy_packed_raw_data.h"
+#include "src/ESPEasyCore/ESPEasyNetwork.h"
+#include "src/Globals/ESPEasyWiFiEvent.h"
+#include "src/Helpers/Memory.h"
+
+#include "ESPEasy-Globals.h"
 
 #define PLUGIN_026
 #define PLUGIN_ID_026         26
@@ -12,12 +18,12 @@
 
 // place sensor type selector right after the output value settings
 #define P026_QUERY1_CONFIG_POS  0
-#define P026_SENSOR_TYPE_INDEX  P026_QUERY1_CONFIG_POS + VARS_PER_TASK
-#define P026_NR_OUTPUT_VALUES   getValueCountFromSensorType(PCONFIG(P026_SENSOR_TYPE_INDEX))
+#define P026_SENSOR_TYPE_INDEX  (P026_QUERY1_CONFIG_POS + VARS_PER_TASK)
+#define P026_NR_OUTPUT_VALUES   getValueCountFromSensorType(static_cast<Sensor_VType>(PCONFIG(P026_SENSOR_TYPE_INDEX)))
 
-#define P026_NR_OUTPUT_OPTIONS  12
+#define P026_NR_OUTPUT_OPTIONS  14
 
-String Plugin_026_valuename(byte value_nr, bool displayString) {
+const __FlashStringHelper * Plugin_026_valuename(uint8_t value_nr, bool displayString) {
   switch (value_nr) {
     case 0:  return displayString ? F("Uptime") : F("uptime");
     case 1:  return displayString ? F("Free RAM") : F("freeheap");
@@ -31,13 +37,15 @@ String Plugin_026_valuename(byte value_nr, bool displayString) {
     case 9:  return displayString ? F("Web activity") : F("web");
     case 10: return displayString ? F("Free Stack") : F("freestack");
     case 11: return displayString ? F("None") : F("");
+    case 12: return displayString ? F("WiFi TX pwr") : F("txpwr");
+    case 13: return displayString ? F("Free 2nd Heap") : F("free2ndheap");
     default:
       break;
   }
-  return "";
+  return F("");
 }
 
-boolean Plugin_026(byte function, struct EventStruct *event, String& string)
+boolean Plugin_026(uint8_t function, struct EventStruct *event, String& string)
 {
   boolean success = false;
 
@@ -46,11 +54,13 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
     case PLUGIN_DEVICE_ADD:
     {
       Device[++deviceCount].Number       = PLUGIN_ID_026;
-      Device[deviceCount].VType          = SENSOR_TYPE_QUAD;
+      Device[deviceCount].VType          = Sensor_VType::SENSOR_TYPE_QUAD;
       Device[deviceCount].ValueCount     = 4;
       Device[deviceCount].SendDataOption = true;
       Device[deviceCount].TimerOption    = true;
       Device[deviceCount].FormulaOption  = true;
+      Device[deviceCount].OutputDataType = Output_Data_type_t::Simple;
+      Device[deviceCount].PluginStats    = true;
       break;
     }
 
@@ -62,10 +72,10 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_GET_DEVICEVALUENAMES:
     {
-      for (byte i = 0; i < VARS_PER_TASK; ++i) {
+      for (uint8_t i = 0; i < VARS_PER_TASK; ++i) {
         if (i < P026_NR_OUTPUT_VALUES) {
-          const byte pconfigIndex = i + P026_QUERY1_CONFIG_POS;
-          byte choice             = PCONFIG(pconfigIndex);
+          const uint8_t pconfigIndex = i + P026_QUERY1_CONFIG_POS;
+          uint8_t choice             = PCONFIG(pconfigIndex);
           safe_strncpy(
             ExtraTaskSettings.TaskDeviceValueNames[i],
             Plugin_026_valuename(choice, false),
@@ -77,30 +87,54 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
       break;
     }
 
+    case PLUGIN_GET_DEVICEVALUECOUNT:
+    {
+      event->Par1 = P026_NR_OUTPUT_VALUES;
+      success = true;
+      break;
+    }
+
+    case PLUGIN_GET_DEVICEVTYPE:
+    {
+      event->sensorType = static_cast<Sensor_VType>(PCONFIG(P026_SENSOR_TYPE_INDEX));
+      event->idx = P026_SENSOR_TYPE_INDEX;
+      success = true;
+      break;
+    }
+
+
     case PLUGIN_SET_DEFAULTS:
     {
       PCONFIG(0) = 0;    // "Uptime"
 
-      for (byte i = 1; i < VARS_PER_TASK; ++i) {
+      for (uint8_t i = 1; i < VARS_PER_TASK; ++i) {
         PCONFIG(i) = 11; // "None"
       }
-      PCONFIG(P026_SENSOR_TYPE_INDEX) = SENSOR_TYPE_QUAD;
+      PCONFIG(P026_SENSOR_TYPE_INDEX) = static_cast<uint8_t>(Sensor_VType::SENSOR_TYPE_QUAD);
       success                         = true;
       break;
     }
 
     case PLUGIN_WEBFORM_LOAD:
     {
-      sensorTypeHelper_webformLoad_simple(event, P026_SENSOR_TYPE_INDEX);
-      String options[P026_NR_OUTPUT_OPTIONS];
+      const __FlashStringHelper * options[P026_NR_OUTPUT_OPTIONS];
+      int indices[P026_NR_OUTPUT_OPTIONS];
 
-      for (byte i = 0; i < P026_NR_OUTPUT_OPTIONS; ++i) {
-        options[i] = Plugin_026_valuename(i, true);
+      int index = 0;
+      for (uint8_t option = 0; option < P026_NR_OUTPUT_OPTIONS; ++option) {
+        if (option != 11) {
+          options[index] = Plugin_026_valuename(option, true);
+          indices[index] = option;
+          ++index;
+        }
       }
+      // Work around to get the "none" at the end.
+      options[index] = Plugin_026_valuename(11, true);
+      indices[index] = 11;
 
-      for (byte i = 0; i < P026_NR_OUTPUT_VALUES; ++i) {
-        const byte pconfigIndex = i + P026_QUERY1_CONFIG_POS;
-        sensorTypeHelper_loadOutputSelector(event, pconfigIndex, i, P026_NR_OUTPUT_OPTIONS, options);
+      for (uint8_t i = 0; i < P026_NR_OUTPUT_VALUES; ++i) {
+        const uint8_t pconfigIndex = i + P026_QUERY1_CONFIG_POS;
+        sensorTypeHelper_loadOutputSelector(event, pconfigIndex, i, P026_NR_OUTPUT_OPTIONS, options, indices);
       }
       success = true;
       break;
@@ -109,19 +143,17 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
     case PLUGIN_WEBFORM_SAVE:
     {
       // Save output selector parameters.
-      for (byte i = 0; i < P026_NR_OUTPUT_VALUES; ++i) {
-        const byte pconfigIndex = i + P026_QUERY1_CONFIG_POS;
-        const byte choice       = PCONFIG(pconfigIndex);
+      for (uint8_t i = 0; i < P026_NR_OUTPUT_VALUES; ++i) {
+        const uint8_t pconfigIndex = i + P026_QUERY1_CONFIG_POS;
+        const uint8_t choice       = PCONFIG(pconfigIndex);
         sensorTypeHelper_saveOutputSelector(event, pconfigIndex, i, Plugin_026_valuename(choice, false));
       }
-      sensorTypeHelper_saveSensorType(event, P026_SENSOR_TYPE_INDEX);
       success = true;
       break;
     }
 
     case PLUGIN_INIT:
     {
-      sensorTypeHelper_setSensorType(event, P026_SENSOR_TYPE_INDEX);
       success = true;
       break;
     }
@@ -133,20 +165,24 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
       }
 
       if (loglevelActiveFor(LOG_LEVEL_INFO)) {
-        String log = F("SYS  : ");
+        String log;
+        if (log.reserve(7 * (P026_NR_OUTPUT_VALUES + 1)))
+        {
+          log += F("SYS  : ");
 
-        for (int i = 0; i < P026_NR_OUTPUT_VALUES; ++i) {
-          if (i != 0) {
-            log += ',';
+          for (int i = 0; i < P026_NR_OUTPUT_VALUES; ++i) {
+            if (i != 0) {
+              log += ',';
+            }
+            log += formatUserVarNoCheck(event->TaskIndex, i);
           }
-          log += UserVar[event->BaseVarIndex + i];
+          addLogMove(LOG_LEVEL_INFO, log);
         }
-        addLog(LOG_LEVEL_INFO, log);
       }
       success = true;
       break;
     }
-#ifdef USES_PACKED_RAW_DATA
+#if FEATURE_PACKED_RAW_DATA
    case PLUGIN_GET_PACKED_RAW_DATA:
     {
       // Matching JS code:
@@ -169,78 +205,41 @@ boolean Plugin_026(byte function, struct EventStruct *event, String& string)
       success = true;
       break;
     }
-#endif // USES_PACKED_RAW_DATA
+#endif // if FEATURE_PACKED_RAW_DATA
   }
   return success;
 }
 
 float P026_get_value(int type)
 {
-  float value = 0;
-
   switch (type)
   {
-    case 0:
-    {
-      value = (wdcounter / 2);
-      break;
-    }
-    case 1:
-    {
-      value = ESP.getFreeHeap();
-      break;
-    }
-    case 2:
-    {
-      value = WiFi.RSSI();
-      break;
-    }
+    case 0: return getUptimeMinutes();
+    case 1: return FreeMem();
+    case 2: return WiFi.RSSI();
     case 3:
-    {
 # if FEATURE_ADC_VCC
-      value = vcc;
+      return vcc;
 # else // if FEATURE_ADC_VCC
-      value = -1.0;
+      return -1.0f;
 # endif // if FEATURE_ADC_VCC
-      break;
-    }
-    case 4:
-    {
-      value = getCPUload();
-      break;
-    }
+    case 4: return getCPUload();
     case 5:
-    {
-      value = WiFi.localIP()[0];
-      break;
-    }
     case 6:
-    {
-      value = WiFi.localIP()[1];
-      break;
-    }
     case 7:
-    {
-      value = WiFi.localIP()[2];
-      break;
-    }
     case 8:
-    {
-      value = WiFi.localIP()[3];
+      return NetworkLocalIP()[type - 5];
+    case 9:  return timePassedSince(lastWeb) / 1000.0f; // respond in seconds
+    case 10: return getCurrentFreeStack();
+    case 12: return WiFiEventData.wifi_TX_pwr;
+    case 13:
+      #ifdef USE_SECOND_HEAP
+      return FreeMem2ndHeap();
+      #else
       break;
-    }
-    case 9:
-    {
-      value = timePassedSince(lastWeb) / 1000; // respond in seconds
-      break;
-    }
-    case 10:
-    {
-      value = getCurrentFreeStack();
-      break;
-    }
+      #endif
   }
-  return value;
+  return 0.0f;
 }
 
 #endif // USES_P026

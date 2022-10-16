@@ -11,6 +11,8 @@ Plugin details
 
 Type: |P078_type|
 
+Port Type: |P078_porttype|
+
 Name: |P078_name|
 
 Status: |P078_status|
@@ -25,6 +27,14 @@ Supported hardware
 ------------------
 
 |P078_usedby|
+
+Sensor
+^^^^^^
+
+See: :ref:`SerialHelper_page`
+
+
+**TODO**: Complete this documentation...
 
 .. Commands available
 .. ^^^^^^^^^^^^^^^^^^

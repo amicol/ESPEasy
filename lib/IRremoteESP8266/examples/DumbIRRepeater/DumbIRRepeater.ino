@@ -37,6 +37,8 @@
  *     * Pin 0/D3: Can interfere with the boot/program mode & support circuits.
  *     * Pin 1/TX/TXD0: Any serial transmissions from the ESP will interfere.
  *     * Pin 3/RX/RXD0: Any serial transmissions to the ESP will interfere.
+ *     * Pin 16/D0: Has no interrupts on the ESP8266, so can't be used for IR
+ *       receiving with this library.
  *   * ESP-01 modules are tricky. We suggest you use a module with more GPIOs
  *     for your first time. e.g. ESP-12 etc.
  *
@@ -54,7 +56,13 @@
 // ==================== start of TUNEABLE PARAMETERS ====================
 
 // The GPIO an IR detector/demodulator is connected to. Recommended: 14 (D5)
+// Note: GPIO 16 won't work on the ESP8266 as it does not have interrupts.
+// Note: GPIO 14 won't work on the ESP32-C3 as it causes the board to reboot.
+#ifdef ARDUINO_ESP32C3_DEV
+const uint16_t kRecvPin = 10;  // 14 on a ESP32-C3 causes a boot loop.
+#else  // ARDUINO_ESP32C3_DEV
 const uint16_t kRecvPin = 14;
+#endif  // ARDUINO_ESP32C3_DEV
 
 // GPIO to use to control the IR LED circuit. Recommended: 4 (D2).
 const uint16_t kIrLedPin = 4;

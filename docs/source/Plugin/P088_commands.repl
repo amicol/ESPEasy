@@ -13,9 +13,9 @@
 
         ``panasonic_jke`` Panasonic JKE series
 
-        ``panasonic_nke`` Panasonic JKE series
+        ``panasonic_nke`` Panasonic NKE series
 
-        ``panasonic_lke`` Panasonic JKE series
+        ``panasonic_lke`` Panasonic LKE series
 
         ``carrier_nqv``   Carrier/Toshiba
 
@@ -30,6 +30,8 @@
         ``mitsubishi_fe`` Mitsubishi FE
 
         ``mitsubishi_msy`` Mitsubishi MSY
+
+        ``mitsubishi_msc`` Mitsubishi MSC
 
         ``mitsubishi_fa`` Mitsubishi FA
 
@@ -46,6 +48,8 @@
         ``mitsubishi_heavy_zj`` Mitsubishi Heavy Electric ZJ
 
         ``mitsubishi_heavy_zm`` Mitsubishi Heavy Electric ZM
+
+        ``mitsubishi_heavy_fdtc`` Mitsubishi Heavy FDTC
 
         ``mitsubishi_sez`` Mitsubishi SEZ
 
@@ -91,11 +95,11 @@
 
         ``5`` Fan only
 
-        ``6`` Maintenance heating (10 or 8 degrees Celcius)
+        ``6`` Maintenance heating (10 or 8 degrees Celsius)
 
         fan: a value from 0 to 5, 0 is auto speed
 
-        temperature: temperature in degrees Celcius, 16-30
+        temperature: temperature in degrees Celsius, 16-30
 
         swingV: vertical swing position (not supported on most models)
 

@@ -11,6 +11,8 @@ Plugin details
 
 Type: |P049_type|
 
+Port Type: |P049_porttype|
+
 Name: |P049_name|
 
 Status: |P049_status|
@@ -25,6 +27,14 @@ Supported hardware
 ------------------
 
 |P049_usedby|
+
+Sensor
+^^^^^^
+
+See: :ref:`SerialHelper_page`
+
+
+**TODO**: Complete this documentation...
 
 .. Commands available
 .. ^^^^^^^^^^^^^^^^^^

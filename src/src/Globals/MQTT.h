@@ -1,21 +1,25 @@
 #ifndef GLOBALS_MQTT_H
 #define GLOBALS_MQTT_H
 
-#include "../../define_plugin_sets.h"
+#include "../../ESPEasy_common.h"
 
 
-#ifdef USES_MQTT
+#if FEATURE_MQTT
 
 # include <WiFiClient.h>
 # include <PubSubClient.h>
+
+#include "../Helpers/LongTermTimer.h"
 
 // MQTT client
 extern WiFiClient   mqtt;
 extern PubSubClient MQTTclient;
 extern bool MQTTclient_should_reconnect;
+extern bool MQTTclient_must_send_LWT_connected;
 extern bool MQTTclient_connected;
 extern int  mqtt_reconnect_count;
-#endif // USES_MQTT
+extern LongTermTimer MQTTclient_next_connect_attempt;
+#endif // if FEATURE_MQTT
 
 #ifdef USES_P037
 

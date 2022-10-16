@@ -326,10 +326,10 @@ Besides the internal events there's also plugin specific events. These are liste
 .. .. include:: ../Plugin/P052_events.repl
 
 
-.. P053 :ref:`P053_page`
-.. ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+P053 :ref:`P053_page`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. .. include:: ../Plugin/P053_events.repl
+.. include:: ../Plugin/P053_events.repl
 
 
 .. P054 :ref:`P054_page`
@@ -494,13 +494,36 @@ Besides the internal events there's also plugin specific events. These are liste
 .. .. include:: ../Plugin/P080_events.repl
 
 
-.. P081 :ref:`P081_page`
-.. ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+P081 :ref:`P081_page`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. .. include:: ../Plugin/P081_events.repl
+.. include:: ../Plugin/P081_events.repl
 
 
 P082 :ref:`P082_page`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. include:: ../Plugin/P082_events.repl
+
+
+
+P097 :ref:`P097_page`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. include:: ../Plugin/P097_events.repl
+
+
+P099 :ref:`P099_page`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. include:: ../Plugin/P099_events.repl
+
+P115 :ref:`P115_page`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. include:: ../Plugin/P115_events.repl
+
+P129 :ref:`P129_page`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. include:: ../Plugin/P129_events.repl

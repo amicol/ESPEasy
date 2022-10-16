@@ -1,8 +1,12 @@
 #include "../DataStructs/ControllerSettingsStruct.h"
 
 #include "../../ESPEasy_common.h"
-#include "../../ESPEasy_fdwdecl.h"
-#include "../DataStructs/ESPEasyLimits.h"
+
+#include "../CustomBuild/ESPEasyLimits.h"
+#include "../ESPEasyCore/ESPEasyNetwork.h"
+#include "../Helpers/Misc.h"
+#include "../Helpers/Networking.h"
+#include "../Helpers/StringConverter.h"
 
 
 #include <IPAddress.h>
@@ -16,25 +20,35 @@ ControllerSettingsStruct::ControllerSettingsStruct()
 }
 
 void ControllerSettingsStruct::reset() {
-  UseDNS                     = false;
-  Port                       = 0;
+  UseDNS                     = DEFAULT_SERVER_USEDNS;
+  Port                       = DEFAULT_PORT;
   MinimalTimeBetweenMessages = CONTROLLER_DELAY_QUEUE_DELAY_DFLT;
   MaxQueueDepth              = CONTROLLER_DELAY_QUEUE_DEPTH_DFLT;
   MaxRetry                   = CONTROLLER_DELAY_QUEUE_RETRY_DFLT;
-  DeleteOldest               = false;
+  DeleteOldest               = DEFAULT_CONTROLLER_DELETE_OLDEST;
   ClientTimeout              = CONTROLLER_CLIENTTIMEOUT_DFLT;
-  MustCheckReply             = false;
+  MustCheckReply             = DEFAULT_CONTROLLER_MUST_CHECK_REPLY ;
   SampleSetInitiator         = INVALID_TASK_INDEX;
+  VariousFlags               = 0;
 
-  for (byte i = 0; i < 4; ++i) {
+  for (uint8_t i = 0; i < 4; ++i) {
     IP[i] = 0;
   }
   ZERO_FILL(HostName);
+  ZERO_FILL(ClientID);
   ZERO_FILL(Publish);
   ZERO_FILL(Subscribe);
   ZERO_FILL(MQTTLwtTopic);
   ZERO_FILL(LWTMessageConnect);
   ZERO_FILL(LWTMessageDisconnect);
+  safe_strncpy(ClientID, F(CONTROLLER_DEFAULT_CLIENTID), sizeof(ClientID));
+}
+
+bool ControllerSettingsStruct::isSet() const {
+  if (UseDNS) {
+    return HostName[0] != 0;
+  }
+  return ipSet();
 }
 
 void ControllerSettingsStruct::validate() {
@@ -81,11 +95,15 @@ void ControllerSettingsStruct::setHostname(const String& controllerhostname) {
   updateIPcache();
 }
 
-boolean ControllerSettingsStruct::checkHostReachable(bool quick) {
-  if (!WiFiConnected(10)) {
+bool ControllerSettingsStruct::checkHostReachable(bool quick) {
+  if (!isSet()) {
+    // No IP/hostname set
+    return false;
+  }
+  if (!NetworkConnected(10)) {
     return false; // Not connected, so no use in wasting time to connect to a host.
   }
-  delay(1);       // Make sure the Watchdog will not trigger a reset.
+  delay(0);       // Make sure the Watchdog will not trigger a reset.
 
   if (quick && ipSet()) { return true; }
 
@@ -97,20 +115,17 @@ boolean ControllerSettingsStruct::checkHostReachable(bool quick) {
   return hostReachable(getIP());
 }
 
-boolean ControllerSettingsStruct::connectToHost(WiFiClient& client) {
+#if FEATURE_HTTP_CLIENT
+bool ControllerSettingsStruct::connectToHost(WiFiClient& client) {
   if (!checkHostReachable(true)) {
     return false; // Host not reachable
   }
-  byte retry     = 2;
+  uint8_t retry     = 2;
   bool connected = false;
 
   while (retry > 0 && !connected) {
     --retry;
-
-    // In case of domain name resolution error result can be negative.
-    // https://github.com/esp8266/Arduino/blob/18f643c7e2d6a0da9d26ff2b14c94e6536ab78c1/libraries/Ethernet/src/Dns.cpp#L44
-    // Thus must match the result with 1.
-    connected = connectClient(client, getIP(), Port);
+    connected = connectClient(client, getIP(), Port, ClientTimeout);
 
     if (connected) { return true; }
 
@@ -120,39 +135,38 @@ boolean ControllerSettingsStruct::connectToHost(WiFiClient& client) {
   }
   return false;
 }
+#endif // FEATURE_HTTP_CLIENT
 
-// Returns 1 if successful, 0 if there was a problem resolving the hostname or port
-int ControllerSettingsStruct::beginPacket(WiFiUDP& client) {
+bool ControllerSettingsStruct::beginPacket(WiFiUDP& client) {
   if (!checkHostReachable(true)) {
-    return 0; // Host not reachable
+    return false; // Host not reachable
   }
-  byte retry     = 2;
-  int  connected = 0;
-
-  while (retry > 0 && connected == 0) {
+  uint8_t retry     = 2;
+  while (retry > 0) {
     --retry;
-    connected = client.beginPacket(getIP(), Port);
-
-    if (connected != 0) { return connected; }
+    FeedSW_watchdog();
+    if (client.beginPacket(getIP(), Port) == 1) {
+      return true;
+    }
 
     if (!checkHostReachable(false)) {
-      return 0;
+      return false;
     }
     delay(10);
   }
-  return 0;
+  return false;
 }
 
 String ControllerSettingsStruct::getHostPortString() const {
   String result = getHost();
 
-  result += ":";
+  result += ':';
   result += Port;
   return result;
 }
 
-bool ControllerSettingsStruct::ipSet() {
-  for (byte i = 0; i < 4; ++i) {
+bool ControllerSettingsStruct::ipSet() const {
+  for (uint8_t i = 0; i < 4; ++i) {
     if (IP[i] != 0) { return true; }
   }
   return false;
@@ -163,14 +177,114 @@ bool ControllerSettingsStruct::updateIPcache() {
     return true;
   }
 
-  if (!WiFiConnected()) { return false; }
+  if (!NetworkConnected()) { return false; }
   IPAddress tmpIP;
 
-  if (resolveHostByName(HostName, tmpIP)) {
-    for (byte x = 0; x < 4; x++) {
+  if (resolveHostByName(HostName, tmpIP, ClientTimeout)) {
+    for (uint8_t x = 0; x < 4; x++) {
       IP[x] = tmpIP[x];
     }
     return true;
   }
   return false;
+}
+
+bool ControllerSettingsStruct::mqtt_cleanSession() const
+{
+  return bitRead(VariousFlags, 1);
+}
+
+void ControllerSettingsStruct::mqtt_cleanSession(bool value)
+{
+  bitWrite(VariousFlags, 1, value);
+}
+
+bool ControllerSettingsStruct::mqtt_sendLWT() const
+{
+  return !bitRead(VariousFlags, 2);
+}
+
+void ControllerSettingsStruct::mqtt_sendLWT(bool value)
+{
+  bitWrite(VariousFlags, 2, !value);
+}
+
+bool ControllerSettingsStruct::mqtt_willRetain() const
+{
+  return !bitRead(VariousFlags, 3);
+}
+
+void ControllerSettingsStruct::mqtt_willRetain(bool value)
+{
+  bitWrite(VariousFlags, 3, !value);
+}
+
+bool ControllerSettingsStruct::mqtt_uniqueMQTTclientIdReconnect() const
+{
+  return bitRead(VariousFlags, 4);
+}
+
+void ControllerSettingsStruct::mqtt_uniqueMQTTclientIdReconnect(bool value)
+{
+  bitWrite(VariousFlags, 4, value);
+}
+
+bool ControllerSettingsStruct::mqtt_retainFlag() const
+{
+  return bitRead(VariousFlags, 5);
+}
+
+void ControllerSettingsStruct::mqtt_retainFlag(bool value)
+{
+  bitWrite(VariousFlags, 5, value);
+}
+
+bool ControllerSettingsStruct::useExtendedCredentials() const
+{
+  return bitRead(VariousFlags, 6);
+}
+
+void ControllerSettingsStruct::useExtendedCredentials(bool value)
+{
+  bitWrite(VariousFlags, 6, value);
+}
+
+bool ControllerSettingsStruct::sendBinary() const
+{
+  return bitRead(VariousFlags, 7);
+}
+
+void ControllerSettingsStruct::sendBinary(bool value)
+{
+  bitWrite(VariousFlags, 7, value);
+}
+
+bool ControllerSettingsStruct::allowExpire() const
+{
+  return bitRead(VariousFlags, 9);
+}
+
+void ControllerSettingsStruct::allowExpire(bool value)
+{
+  bitWrite(VariousFlags, 9, value);
+}
+
+bool ControllerSettingsStruct::deduplicate() const
+{
+  return bitRead(VariousFlags, 10);
+}
+
+void ControllerSettingsStruct::deduplicate(bool value)
+{
+  bitWrite(VariousFlags, 10, value);
+}
+
+bool ControllerSettingsStruct::useLocalSystemTime() const
+{
+  return bitRead(VariousFlags, 11);
+}
+
+void ControllerSettingsStruct::useLocalSystemTime(bool value)
+{
+  bitWrite(VariousFlags, 11, value);
 }

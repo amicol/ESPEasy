@@ -6,7 +6,15 @@
 
 #include <Arduino.h>
 
-#ifdef ESP8266
+#if defined(DEBUG) && (DEBUG > 0)
+#define LOG(...) Serial.print(__VA_ARGS__)
+#define LOGLN(...) Serial.println(__VA_ARGS__)
+#else
+#define LOG(...)
+#define LOGLN(...)
+#endif
+
+#if defined(ESP8266) || defined(ESP32)
 #include <IRsend.h>  // From IRremoteESP8266 library
 #include <stdint.h>
 #endif
@@ -75,7 +83,7 @@ class IRSenderESP32 : public IRSender
 };
 #endif
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
 class IRSenderIRremoteESP8266 : public IRSender
 {
   public:

@@ -1,8 +1,11 @@
+#include "_Plugin_Helper.h"
 #ifdef USES_P085
 
 // #######################################################################################################
 // ############################# Plugin 085: AccuEnergy AcuDC24x #########################################
 // #######################################################################################################
+
+# include "src/PluginStructs/P085_data_struct.h"
 
 /*
 
@@ -13,82 +16,20 @@
     Use 1kOhm in serie on datapins!
  */
 
-#define PLUGIN_085
-#define PLUGIN_ID_085 85
-#define PLUGIN_NAME_085 "Energy - AccuEnergy AcuDC24x [TESTING]"
-#define PLUGIN_VALUENAME1_085 ""
+# define PLUGIN_085
+# define PLUGIN_ID_085 85
+# define PLUGIN_NAME_085 "Energy - AccuEnergy AcuDC24x"
+# define PLUGIN_VALUENAME1_085 ""
 
-#define P085_DEV_ID         PCONFIG(0)
-#define P085_DEV_ID_LABEL   PCONFIG_LABEL(0)
-#define P085_MODEL          PCONFIG(1)
-#define P085_MODEL_LABEL    PCONFIG_LABEL(1)
-#define P085_BAUDRATE       PCONFIG(2)
-#define P085_BAUDRATE_LABEL PCONFIG_LABEL(2)
-#define P085_QUERY1         PCONFIG(3)
-#define P085_QUERY2         PCONFIG(4)
-#define P085_QUERY3         PCONFIG(5)
-#define P085_QUERY4         PCONFIG(6)
-#define P085_DEPIN          CONFIG_PIN3
 
-#define P085_NR_OUTPUT_VALUES   VARS_PER_TASK
-#define P085_QUERY1_CONFIG_POS  3
-
-#define P085_QUERY_V       0
-#define P085_QUERY_A       1
-#define P085_QUERY_W       2
-#define P085_QUERY_Wh_imp  3
-#define P085_QUERY_Wh_exp  4
-#define P085_QUERY_Wh_tot  5
-#define P085_QUERY_Wh_net  6
-#define P085_QUERY_h_tot   7
-#define P085_QUERY_h_load  8
-#define P085_NR_OUTPUT_OPTIONS   9 // Must be the last one
-
-#define P085_DEV_ID_DFLT   1       // Modbus communication address
-#define P085_MODEL_DFLT    0       // AcuDC24x
-#define P085_BAUDRATE_DFLT 4       // 19200 baud
-#define P085_QUERY1_DFLT   P085_QUERY_V
-#define P085_QUERY2_DFLT   P085_QUERY_A
-#define P085_QUERY3_DFLT   P085_QUERY_W
-#define P085_QUERY4_DFLT   P085_QUERY_Wh_tot
-
-#define P085_MEASUREMENT_INTERVAL 60000L
-
-#include <ESPeasySerial.h>
-
-struct P085_data_struct : public PluginTaskData_base {
-  P085_data_struct() {}
-
-  ~P085_data_struct() {
-    reset();
-  }
-
-  void reset() {
-    modbus.reset();
-  }
-
-  bool init(const int16_t serial_rx, const int16_t serial_tx, int8_t dere_pin,
-            unsigned int baudrate, uint8_t modbusAddress) {
-    return modbus.init(serial_rx, serial_tx, baudrate, modbusAddress, dere_pin);
-  }
-
-  bool isInitialized() const {
-    return modbus.isInitialized();
-  }
-
-  ModbusRTU_struct modbus;
-};
-
-unsigned int _plugin_085_last_measurement = 0;
-
-boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
+boolean Plugin_085(uint8_t function, struct EventStruct *event, String& string) {
   boolean success = false;
 
   switch (function) {
     case PLUGIN_DEVICE_ADD: {
       Device[++deviceCount].Number           = PLUGIN_ID_085;
-      Device[deviceCount].Type               =  DEVICE_TYPE_TRIPLE; // connected through 3 datapins
-      Device[deviceCount].VType              = SENSOR_TYPE_QUAD;
+      Device[deviceCount].Type               = DEVICE_TYPE_SERIAL_PLUS1; // connected through 3 datapins
+      Device[deviceCount].VType              = Sensor_VType::SENSOR_TYPE_QUAD;
       Device[deviceCount].Ports              = 0;
       Device[deviceCount].PullUpOption       = false;
       Device[deviceCount].InverseLogicOption = false;
@@ -97,6 +38,8 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
       Device[deviceCount].SendDataOption     = true;
       Device[deviceCount].TimerOption        = true;
       Device[deviceCount].GlobalSyncOption   = true;
+      Device[deviceCount].ExitTaskBeforeSave = false;
+      Device[deviceCount].PluginStats        = true;
       break;
     }
 
@@ -106,10 +49,10 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
     }
 
     case PLUGIN_GET_DEVICEVALUENAMES: {
-      for (byte i = 0; i < VARS_PER_TASK; ++i) {
+      for (uint8_t i = 0; i < VARS_PER_TASK; ++i) {
         if (i < P085_NR_OUTPUT_VALUES) {
-          const byte pconfigIndex = i + P085_QUERY1_CONFIG_POS;
-          byte choice             = PCONFIG(pconfigIndex);
+          const uint8_t pconfigIndex = i + P085_QUERY1_CONFIG_POS;
+          uint8_t choice             = PCONFIG(pconfigIndex);
           safe_strncpy(
             ExtraTaskSettings.TaskDeviceValueNames[i],
             Plugin_085_valuename(choice, false),
@@ -123,7 +66,7 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
 
     case PLUGIN_GET_DEVICEGPIONAMES: {
       serialHelper_getGpioNames(event);
-      event->String3 = formatGpioName_output_optional("DE");
+      event->String3 = formatGpioName_output_optional(F("DE"));
       break;
     }
 
@@ -151,31 +94,25 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
       break;
     }
 
-    case PLUGIN_WEBFORM_LOAD: {
-      serialHelper_webformLoad(event);
+    case PLUGIN_WEBFORM_SHOW_SERIAL_PARAMS:
+    {
+      String options_baudrate[6];
 
-      {
-        // Modbus parameters put in scope to make sure the String array will not keep memory occupied.
-        String options_baudrate[6];
-
-        for (int i = 0; i < 6; ++i) {
-          options_baudrate[i] = String(p085_storageValueToBaudrate(i));
-        }
-        addFormNumericBox(F("Modbus Address"), P085_DEV_ID_LABEL, P085_DEV_ID, 1,
-                          247);
-        addFormSelector(F("Baud Rate"), P085_BAUDRATE_LABEL, 6, options_baudrate,
-                        NULL, P085_BAUDRATE);
+      for (int i = 0; i < 6; ++i) {
+        options_baudrate[i] = String(p085_storageValueToBaudrate(i));
       }
+      addFormSelector(F("Baud Rate"), P085_BAUDRATE_LABEL, 6, options_baudrate, nullptr, P085_BAUDRATE);
+      addUnit(F("baud"));
+      addFormNumericBox(F("Modbus Address"), P085_DEV_ID_LABEL, P085_DEV_ID, 1, 247);
+      break;
+    }
 
+    case PLUGIN_WEBFORM_LOAD: {
       P085_data_struct *P085_data =
         static_cast<P085_data_struct *>(getPluginTaskData(event->TaskIndex));
 
       if ((nullptr != P085_data) && P085_data->isInitialized()) {
-        String detectedString = P085_data->modbus.detected_device_description;
-
-        if (detectedString.length() > 0) {
-          addFormNote(detectedString);
-        }
+        addFormNote(P085_data->modbus.detected_device_description);
         addRowLabel(F("Checksum (pass/fail/nodata)"));
         uint32_t reads_pass, reads_crc_failed, reads_nodata;
         P085_data->modbus.getStatistics(reads_pass, reads_crc_failed, reads_nodata);
@@ -191,18 +128,18 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
 
         // Calibration data is stored in the AcuDC module, not in the settings of ESPeasy.
         {
-          byte errorcode = 0;
-          int  value     = P085_data->modbus.readHoldingRegister(0x107, errorcode);
+          uint8_t errorcode = 0;
+          int     value     = P085_data->modbus.readHoldingRegister(0x107, errorcode);
 
           if (errorcode == 0) {
             addFormNumericBox(F("Full Range Voltage Value"), F("p085_fr_volt"), value, 5, 9999);
-            addUnit(F("V"));
+            addUnit('V');
           }
           value = P085_data->modbus.readHoldingRegister(0x104, errorcode);
 
           if (errorcode == 0) {
             addFormNumericBox(F("Full Range Current Value"), F("p085_fr_curr"), value, 20, 50000);
-            addUnit(F("A"));
+            addUnit('A');
           }
           value = P085_data->modbus.readHoldingRegister(0x105, errorcode);
 
@@ -222,7 +159,7 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
 
           if (errorcode == 0) {
             addRowLabel(F("Mode of data logging"));
-            addHtml(String(value));
+            addHtmlInt(value);
           }
           value = P085_data->modbus.readHoldingRegister(0x502, errorcode);
 
@@ -249,14 +186,14 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
       {
         // In a separate scope to free memory of String array as soon as possible
         sensorTypeHelper_webformLoad_header();
-        String options[P085_NR_OUTPUT_OPTIONS];
+        const __FlashStringHelper *options[P085_NR_OUTPUT_OPTIONS];
 
         for (int i = 0; i < P085_NR_OUTPUT_OPTIONS; ++i) {
           options[i] = Plugin_085_valuename(i, true);
         }
 
-        for (byte i = 0; i < P085_NR_OUTPUT_VALUES; ++i) {
-          const byte pconfigIndex = i + P085_QUERY1_CONFIG_POS;
+        for (uint8_t i = 0; i < P085_NR_OUTPUT_VALUES; ++i) {
+          const uint8_t pconfigIndex = i + P085_QUERY1_CONFIG_POS;
           sensorTypeHelper_loadOutputSelector(event, pconfigIndex, i, P085_NR_OUTPUT_OPTIONS, options);
         }
       }
@@ -265,17 +202,15 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
     }
 
     case PLUGIN_WEBFORM_SAVE: {
-      serialHelper_webformSave(event);
-
       // Save normal parameters
       for (int i = 0; i < P085_QUERY1_CONFIG_POS; ++i) {
         pconfig_webformSave(event, i);
       }
 
       // Save output selector parameters.
-      for (byte i = 0; i < P085_NR_OUTPUT_VALUES; ++i) {
-        const byte pconfigIndex = i + P085_QUERY1_CONFIG_POS;
-        const byte choice       = PCONFIG(pconfigIndex);
+      for (uint8_t i = 0; i < P085_NR_OUTPUT_VALUES; ++i) {
+        const uint8_t pconfigIndex = i + P085_QUERY1_CONFIG_POS;
+        const uint8_t choice       = PCONFIG(pconfigIndex);
         sensorTypeHelper_saveOutputSelector(event, pconfigIndex, i, Plugin_085_valuename(choice, false));
       }
       P085_data_struct *P085_data =
@@ -319,9 +254,10 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
     }
 
     case PLUGIN_INIT: {
-      const int16_t serial_rx = CONFIG_PIN1;
-      const int16_t serial_tx = CONFIG_PIN2;
-      initPluginTaskData(event->TaskIndex, new P085_data_struct());
+      const int16_t serial_rx      = CONFIG_PIN1;
+      const int16_t serial_tx      = CONFIG_PIN2;
+      const ESPEasySerialPort port = static_cast<ESPEasySerialPort>(CONFIG_PORT);
+      initPluginTaskData(event->TaskIndex, new (std::nothrow) P085_data_struct());
       P085_data_struct *P085_data =
         static_cast<P085_data_struct *>(getPluginTaskData(event->TaskIndex));
 
@@ -329,9 +265,10 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
         return success;
       }
 
-      if (P085_data->init(serial_rx, serial_tx, P085_DEPIN,
+      if (P085_data->init(port, serial_rx, serial_tx, P085_DEPIN,
                           p085_storageValueToBaudrate(P085_BAUDRATE),
                           P085_DEV_ID)) {
+        serialHelper_log_GpioDescription(port, serial_rx, serial_tx);
         success = true;
       } else {
         clearPluginTaskData(event->TaskIndex);
@@ -340,7 +277,6 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
     }
 
     case PLUGIN_EXIT: {
-      clearPluginTaskData(event->TaskIndex);
       success = true;
       break;
     }
@@ -359,84 +295,32 @@ boolean Plugin_085(byte function, struct EventStruct *event, String& string) {
       }
       break;
     }
+# if FEATURE_PACKED_RAW_DATA
+    case PLUGIN_GET_PACKED_RAW_DATA:
+    {
+      // FIXME TD-er: Same code as in P102, share in LoRa code.
+      P085_data_struct *P085_data =
+        static_cast<P085_data_struct *>(getPluginTaskData(event->TaskIndex));
+
+      if ((nullptr != P085_data) && P085_data->isInitialized()) {
+        // Matching JS code:
+        // return decode(bytes, [header, uint8, int32_1e4, uint8, int32_1e4, uint8, int32_1e4, uint8, int32_1e4],
+        //   ['header', 'unit1', 'val_1', 'unit2', 'val_2', 'unit3', 'val_3', 'unit4', 'val_4']);
+        for (uint8_t i = 0; i < VARS_PER_TASK; ++i) {
+          const uint8_t pconfigIndex = i + P085_QUERY1_CONFIG_POS;
+          const uint8_t choice       = PCONFIG(pconfigIndex);
+          string += LoRa_addInt(choice, PackedData_uint8);
+          string += LoRa_addFloat(UserVar[event->BaseVarIndex + i], PackedData_int32_1e4);
+        }
+        event->Par1 = 8; // valuecount
+
+        success = true;
+      }
+      break;
+    }
+# endif // if FEATURE_PACKED_RAW_DATA
   }
   return success;
-}
-
-String Plugin_085_valuename(byte value_nr, bool displayString) {
-  switch (value_nr) {
-    case P085_QUERY_V:      return displayString ? F("Voltage (V)") : F("V");
-    case P085_QUERY_A:      return displayString ? F("Current (A)") : F("A");
-    case P085_QUERY_W:      return displayString ? F("Power (W)") : F("W");
-    case P085_QUERY_Wh_imp: return displayString ? F("Import Energy (Wh)") : F("Wh_imp");
-    case P085_QUERY_Wh_exp: return displayString ? F("Export Energy (Wh)") : F("Wh_exp");
-    case P085_QUERY_Wh_tot: return displayString ? F("Total Energy (Wh)") : F("Wh_tot");
-    case P085_QUERY_Wh_net: return displayString ? F("Net Energy (Wh)") : F("Wh_net");
-    case P085_QUERY_h_tot:  return displayString ? F("Meter Running Time (h)") : F("h_tot");
-    case P085_QUERY_h_load: return displayString ? F("Load Running Time (h)") : F("h_load");
-  }
-  return "";
-}
-
-int p085_storageValueToBaudrate(byte baudrate_setting) {
-  switch (baudrate_setting) {
-    case 0:
-      return 1200;
-    case 1:
-      return 2400;
-    case 2:
-      return 4800;
-    case 3:
-      return 9600;
-    case 4:
-      return 19200;
-    case 5:
-      return 38500;
-  }
-  return 19200;
-}
-
-float p085_readValue(byte query, struct EventStruct *event) {
-  P085_data_struct *P085_data =
-    static_cast<P085_data_struct *>(getPluginTaskData(event->TaskIndex));
-
-  if ((nullptr != P085_data) && P085_data->isInitialized()) {
-    switch (query) {
-      case P085_QUERY_V:
-        return P085_data->modbus.read_float_HoldingRegister(0x200);
-      case P085_QUERY_A:
-        return P085_data->modbus.read_float_HoldingRegister(0x202);
-      case P085_QUERY_W:
-        return P085_data->modbus.read_float_HoldingRegister(0x204) * 1000.0; // power (kW => W)
-      case P085_QUERY_Wh_imp:
-        return P085_data->modbus.read_32b_HoldingRegister(0x300) * 10.0;     // 0.01 kWh => Wh
-      case P085_QUERY_Wh_exp:
-        return P085_data->modbus.read_32b_HoldingRegister(0x302) * 10.0;     // 0.01 kWh => Wh
-      case P085_QUERY_Wh_tot:
-        return P085_data->modbus.read_32b_HoldingRegister(0x304) * 10.0;     // 0.01 kWh => Wh
-      case P085_QUERY_Wh_net:
-      {
-        int64_t intvalue = P085_data->modbus.read_32b_HoldingRegister(0x306);
-
-        if (intvalue >= 2147483648ll) {
-          intvalue = 4294967296ll - intvalue;
-        }
-        float value = static_cast<float>(intvalue);
-        value *= 10.0; // 0.01 kWh => Wh
-        return value;
-      }
-      case P085_QUERY_h_tot:
-        return P085_data->modbus.read_32b_HoldingRegister(0x280) / 100.0;
-      case P085_QUERY_h_load:
-        return P085_data->modbus.read_32b_HoldingRegister(0x282) / 100.0;
-    }
-  }
-  return 0.0;
-}
-
-void p085_showValueLoadPage(byte query, struct EventStruct *event) {
-  addRowLabel(Plugin_085_valuename(query, true));
-  addHtml(String(p085_readValue(query, event)));
 }
 
 #endif // USES_P085

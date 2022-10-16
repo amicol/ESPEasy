@@ -1,22 +1,17 @@
 #include "../Commands/UPD.h"
 
+
 #include "../../ESPEasy_common.h"
+
 #include "../Commands/Common.h"
+#include "../ESPEasyCore/ESPEasyNetwork.h"
+#include "../Globals/NetworkState.h"
 #include "../Globals/Settings.h"
-#include "../../ESPEasy-Globals.h"
-
-#include "../../ESPEasy_fdwdecl.h"
-
-String Command_UDP_Test(struct EventStruct *event, const char *Line)
-{
-  for (byte x = 0; x < event->Par2; x++)
-  {
-    String eventName = "Test ";
-    eventName += x;
-    SendUDPCommand(event->Par1, eventName.c_str(), eventName.length());
-  }
-  return return_command_success();
-}
+#include "../Helpers/Misc.h"
+#include "../Helpers/Network.h"
+#include "../Helpers/Networking.h"
+#include "../Helpers/StringConverter.h"
+#include "../Helpers/StringParser.h"
 
 String Command_UDP_Port(struct EventStruct *event, const char *Line)
 {
@@ -26,7 +21,21 @@ String Command_UDP_Port(struct EventStruct *event, const char *Line)
                               1);
 }
 
-String Command_UPD_SendTo(struct EventStruct *event, const char *Line)
+#if FEATURE_ESPEASY_P2P
+
+const __FlashStringHelper * Command_UDP_Test(struct EventStruct *event, const char *Line)
+{
+  for (uint8_t x = 0; x < event->Par2; x++)
+  {
+    String eventName = "Test ";
+    eventName += x;
+    SendUDPCommand(event->Par1, eventName.c_str(), eventName.length());
+  }
+  return return_command_success();
+}
+
+
+const __FlashStringHelper * Command_UPD_SendTo(struct EventStruct *event, const char *Line)
 {
   int destUnit = parseCommandArgumentInt(Line, 1);
   if ((destUnit > 0) && (destUnit < 255))
@@ -36,10 +45,11 @@ String Command_UPD_SendTo(struct EventStruct *event, const char *Line)
   }
   return return_command_success();
 }
+#endif //FEATURE_ESPEASY_P2P
 
-String Command_UDP_SendToUPD(struct EventStruct *event, const char *Line)
+const __FlashStringHelper * Command_UDP_SendToUPD(struct EventStruct *event, const char *Line)
 {
-  if (WiFiConnected()) {
+  if (NetworkConnected()) {
     String ip      = parseString(Line, 2);
     int port    = parseCommandArgumentInt(Line, 2);
 
@@ -50,14 +60,17 @@ String Command_UDP_SendToUPD(struct EventStruct *event, const char *Line)
     IPAddress UDP_IP;
 
     if (UDP_IP.fromString(ip)) {
+      FeedSW_watchdog();
       portUDP.beginPacket(UDP_IP, port);
       #if defined(ESP8266)
       portUDP.write(message.c_str(),            message.length());
       #endif // if defined(ESP8266)
       #if defined(ESP32)
-      portUDP.write((uint8_t *)message.c_str(), message.length());
+      portUDP.write(reinterpret_cast<const uint8_t *>(message.c_str()), message.length());
       #endif // if defined(ESP32)
       portUDP.endPacket();
+      FeedSW_watchdog();
+      delay(0);
     }
     return return_command_success();
   }
