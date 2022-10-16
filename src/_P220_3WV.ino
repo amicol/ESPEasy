@@ -4,6 +4,7 @@
 //#######################################################################################################
 
 #include "PID_v1.h"
+#include "QuickPID.h"
 
 #define PLUGIN_220
 #define PLUGIN_ID_220        220
@@ -25,17 +26,26 @@
 #define way3_PID_Kd .2
 
 
-double Output;
+float Output;
 //double input;
-double target_3WV;
+float target_3WV;
 //PID *way3_PID;
 //double main_input;
 //PID *main_PID;
-double ambient_temp;
-double input_temp;
-double target;
-PID main_PID(&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, DIRECT);
-PID way3_PID(&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
+float ambient_temp;
+float input_temp;
+float target;
+QuickPID main_PID(&ambient_temp, &target_3WV, &target,main_PID_Kp, main_PID_Ki, main_PID_Kd, //DIRECT);
+               main_PID.pMode::pOnError,                   /* pOnError, pOnMeas, pOnErrorMeas */
+               main_PID.dMode::dOnMeas,                    /* dOnError, dOnMeas */
+               main_PID.iAwMode::iAwCondition,             /* iAwCondition, iAwClamp, iAwOff */
+               main_PID.Action::direct);                   /* direct, reverse */
+QuickPID way3_PID(&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, //DIRECT);
+               way3_PID.pMode::pOnError,                   /* pOnError, pOnMeas, pOnErrorMeas */
+               way3_PID.dMode::dOnMeas,                    /* dOnError, dOnMeas */
+               way3_PID.iAwMode::iAwCondition,             /* iAwCondition, iAwClamp, iAwOff */
+               way3_PID.Action::direct);                   /* direct, reverse */
+
 unsigned long stopServoAt;
 unsigned long lastRegulation;
 unsigned long last_main_Regulation;
@@ -83,10 +93,10 @@ bool regulate_on = 1;
 void reset_PID(struct EventStruct *event)
 {
 		start_circulator = true;
-		way3_PID.SetMode(MANUAL);
+		way3_PID.SetMode(way3_PID.Control::manual);
 		Output = 0;
 		setServoTo(0,event);
-		way3_PID.SetMode(AUTOMATIC);
+		way3_PID.SetMode(way3_PID.Control::automatic);
 }
 void update(struct EventStruct *event)
 {
@@ -321,6 +331,11 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
 
         addFormTextBox(F("Maximum temperature"), F("p220_tempmax"), String(PCONFIG_FLOAT(1)), 8);
 
+        addFormTextBox(F("Main_PID_Kp"), F("p220_main_PID_Kp"), String(PCONFIG_LONG(0)), 8);
+        addFormTextBox(F("Main_PID_Ki"), F("p220_main_PID_Ki"), String(PCONFIG_LONG(1)), 8);
+        addFormTextBox(F("way3_PID_Kp"), F("p220_way3_PID_Kp"), String(PCONFIG_LONG(2)), 8);
+        addFormTextBox(F("way3_PID_Ki"), F("p220_way3_PID_Ki"), String(PCONFIG_LONG(3)), 8);
+
         LoadTaskSettings(event->TaskIndex); // we need to restore our original taskvalues!
         success = true;
         break;
@@ -338,6 +353,10 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         PCONFIG(7) = getFormItemInt(F("p220_value_setpoint"));
         PCONFIG_FLOAT(0) = getFormItemFloat(F("p220_resetvalue"));
         PCONFIG_FLOAT(1) = getFormItemFloat(F("p220_tempmax"));
+        PCONFIG_LONG(0) = getFormItemFloat(F("p220_main_PID_Kp"));
+        PCONFIG_LONG(1) = getFormItemFloat(F("p220_main_PID_Ki"));
+        PCONFIG_LONG(2) = getFormItemFloat(F("p220_way3_PID_Kp"));
+        PCONFIG_LONG(3) = getFormItemFloat(F("p220_way3_PID_Ki"));
         success = true;
         break;
       }
@@ -410,8 +429,11 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         //way3_PID = new PID (&input_temp, &Output, &target_3WV,way3_PID_Kp, way3_PID_Ki, way3_PID_Kd, DIRECT);
 
         //turn the PID on
-        way3_PID.SetMode(AUTOMATIC);
-        main_PID.SetMode(AUTOMATIC);
+        main_PID.SetTunings(PCONFIG_LONG(0), PCONFIG_LONG(1), 0 );
+        way3_PID.SetTunings(PCONFIG_LONG(2), PCONFIG_LONG(3), 0.2);
+
+        way3_PID.SetMode(way3_PID.Control::automatic);
+        main_PID.SetMode(main_PID.Control::automatic);
 
         way3_PID.SetOutputLimits(0, MAX_3WAY);
         main_PID.SetOutputLimits(15., PCONFIG_FLOAT(1));
