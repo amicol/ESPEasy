@@ -1,8 +1,11 @@
+#include "_Plugin_Helper.h"
+
 #ifdef USES_P220
 //#######################################################################################################
 //#################################### Plugin 220: Level Control ########################################
 //#######################################################################################################
 
+#include "src/Helpers/Rules_calculate.h"
 #include "PID_v1.h"
 #include "QuickPID.h"
 
@@ -262,7 +265,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
       {
         Device[++deviceCount].Number = PLUGIN_ID_220;
         Device[deviceCount].Type = DEVICE_TYPE_TRIPLE;
-        Device[deviceCount].VType = SENSOR_TYPE_SWITCH;
+        Device[deviceCount].VType = Sensor_VType::SENSOR_TYPE_SWITCH;
         Device[deviceCount].Ports = 0;
         Device[deviceCount].PullUpOption = false;
         Device[deviceCount].InverseLogicOption = false;
@@ -381,8 +384,8 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
         if (command == F("setlevel"))
         {
           String value = parseString(string, 2);
-          float result=0;
-          Calculate(value.c_str(), &result);
+          double result=0;
+          Calculate(value, result);
           byte TaskIndex3 = PCONFIG(6);
           byte BaseVarIndex3 = TaskIndex3 * VARS_PER_TASK + PCONFIG(7);
 
@@ -395,7 +398,7 @@ boolean Plugin_220(byte function, struct EventStruct *event, String& string)
           byte TaskIndex3 = PCONFIG(6);
           byte BaseVarIndex3 = TaskIndex3 * VARS_PER_TASK + PCONFIG(7);
           string = UserVar[BaseVarIndex3];
-          SendStatus(event->Source, string);
+          SendStatus(event, string);
           success = true;
         }
         break;
