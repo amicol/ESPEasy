@@ -7,6 +7,7 @@
 #include "../DataTypes/EventValueSource.h"
 #include "../ESPEasyCore/ESPEasy_Log.h"
 #include "../ESPEasyCore/ESPEasy_backgroundtasks.h"
+#include "../ESPEasyCore/ESPEasyEth.h"
 #include "../ESPEasyCore/ESPEasyNetwork.h"
 #include "../ESPEasyCore/ESPEasyWifi.h"
 #include "../Globals/ESPEasyWiFiEvent.h"
@@ -309,9 +310,14 @@ void checkUDP()
                   break;
                 }
                 int copy_length = sizeof(NodeStruct);
+                // Older versions sent 80 bytes, regardless of the size of NodeStruct
+                // Make sure the extra data received is ignored as it was also not initialized
+                if (len == 80) {
+                  copy_length = 56;
+                }
 
-                if (copy_length > len) {
-                  copy_length = len;
+                if (copy_length > (len - 2)) {
+                  copy_length = (len - 2);
                 }
                 NodeStruct received;
                 memcpy(&received, &packetBuffer[2], copy_length);
@@ -477,7 +483,8 @@ void sendSysInfoUDP(uint8_t repeats)
   }
 
   // Prepare UDP packet to send
-  uint8_t data[80];
+  constexpr size_t data_size = sizeof(NodeStruct) + 2;
+  uint8_t data[data_size] = {0};
   data[0] = 255;
   data[1] = 1;
   memcpy(&data[2], thisNode, sizeof(NodeStruct));
@@ -489,7 +496,7 @@ void sendSysInfoUDP(uint8_t repeats)
     IPAddress broadcastIP(255, 255, 255, 255);
     FeedSW_watchdog();
     portUDP.beginPacket(broadcastIP, Settings.UDPPort);
-    portUDP.write(data, 80);
+    portUDP.write(data, data_size);
     portUDP.endPacket();
 
     if (counter < (repeats - 1)) {
@@ -915,6 +922,15 @@ bool hasIPaddr() {
 #endif // ifdef CORE_POST_2_5_0
 }
 
+bool useStaticIP() {
+  #if FEATURE_ETHERNET
+  if (active_network_medium == NetworkMedium_t::Ethernet) {
+    return ethUseStaticIP();
+  }
+  #endif
+  return WiFiUseStaticIP();
+}
+
 // Check connection. Maximum timeout 500 msec.
 bool NetworkConnected(uint32_t timeout_ms) {
 
@@ -1274,6 +1290,7 @@ String getDigestAuth(const String& authReq,
   return authorization;
 }
 
+#ifndef BUILD_NO_DEBUG
 void log_http_result(const HTTPClient& http,
                      const String    & logIdentifier,
                      const String    & host,
@@ -1319,6 +1336,7 @@ void log_http_result(const HTTPClient& http,
     addLogMove(loglevel, log);
   }
 }
+#endif
 
 int http_authenticate(const String& logIdentifier,
                       WiFiClient  & client,
@@ -1464,7 +1482,9 @@ int http_authenticate(const String& logIdentifier,
     event += httpCode;
     eventQueue.addMove(std::move(event));
   }
+#ifndef BUILD_NO_DEBUG
   log_http_result(http, logIdentifier, host, HttpMethod, httpCode, EMPTY_STRING);
+#endif
   return httpCode;
 }
 
@@ -1503,10 +1523,11 @@ String send_via_http(const String& logIdentifier,
 
   if ((httpCode > 0) && must_check_reply) {
     response = http.getString();
-
+#ifndef BUILD_NO_DEBUG
     if (!response.isEmpty()) {
       log_http_result(http, logIdentifier, host, HttpMethod, httpCode, response);
     }
+#endif
   }
   http.end();
   // http.end() does not call client.stop() if it is no longer connected.
